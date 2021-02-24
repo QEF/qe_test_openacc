@@ -39,6 +39,33 @@
 ! The file is written mainly by Stefano de Gironcoli and Yan Pan.
 !
 !-------------------------------------------------------------------------------
+!civn
+SUBROUTINE wrap_paro_k_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
+                   npwx, npw, nbnd, npol, evc, eig, btype, ethr, notconv, nhpsi )
+  USE util_param,          ONLY : DP, stdout
+implicit none
+  LOGICAL, INTENT(IN)        :: overlap
+  INTEGER, INTENT(IN)        :: npw, npwx, nbnd, npol
+  COMPLEX(DP), INTENT(INOUT) :: evc(npwx*npol,nbnd)
+  REAL(DP), INTENT(IN)       :: ethr
+  REAL(DP), INTENT(INOUT)    :: eig(nbnd)   
+  INTEGER, INTENT(IN)        :: btype(nbnd)
+  INTEGER, INTENT(OUT)       :: notconv, nhpsi
+  EXTERNAL h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu
+
+  write(stdout, *) 'wrapping ParO_k...'
+
+!$acc data copy(evc(:,:), eig(:)) 
+!$acc host_data use_device(evc, eig)
+  Call paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
+                     npwx, npw, nbnd, npol, evc, eig, btype, ethr, notconv, nhpsi )
+!$acc end host_data
+!$acc end data
+
+RETURN
+
+END SUBROUTINE
+!
 SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
                    npwx, npw, nbnd, npol, evc_d, eig_d, btype, ethr, notconv, nhpsi )
   !-------------------------------------------------------------------------------

@@ -39,8 +39,34 @@
 ! The file is written mainly by Stefano de Gironcoli and Yan Pan.
 !
 !-------------------------------------------------------------------------------
+!civn
+SUBROUTINE wrap_paro_k_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
+                   npwx, npw, nbnd, npol, evc, eig, btype, ethr, notconv, nhpsi )
+  USE util_param,          ONLY : DP, stdout
+implicit none
+  LOGICAL, INTENT(IN)        :: overlap
+  INTEGER, INTENT(IN)        :: npw, npwx, nbnd, npol
+  COMPLEX(DP), INTENT(INOUT) :: evc(npwx*npol,nbnd)
+  REAL(DP), INTENT(IN)       :: ethr
+  REAL(DP), INTENT(INOUT)    :: eig(nbnd)   
+  INTEGER, INTENT(IN)        :: btype(nbnd)
+  INTEGER, INTENT(OUT)       :: notconv, nhpsi
+  EXTERNAL h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu
+
+  write(stdout, *) 'wrapping ParO_k...'
+
+!$acc data copy(evc(:,:), eig(:)) 
+!$acc host_data use_device(evc, eig)
+  Call paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
+                     npwx, npw, nbnd, npol, evc, eig, btype, ethr, notconv, nhpsi )
+!$acc end host_data
+!$acc end data
+
+RETURN
+
+END SUBROUTINE
 !
-SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
+SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
                    npwx, npw, nbnd, npol, evc_d, eig_d, btype, ethr, notconv, nhpsi )
   !-------------------------------------------------------------------------------
   !paro_flag = 1: modified parallel orbital-updating method
@@ -106,6 +132,9 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
   attributes(device) :: psi_d, hpsi_d, spsi_d, ew_d
   attributes(device) :: conv_d 
 #endif  
+!civn 
+  write(*,*) 'using paro_k_new_acc'
+!
   !
   ! ... init local variables
   !
@@ -124,11 +153,11 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   CALL start_clock( 'paro:init' ); 
   conv(:) =  .FALSE. ; nconv = COUNT ( conv(:) )
-!$cuf kernel do(1)
+!$acc parallel loop
   do ii = 1, nbnd
     conv_d(ii) = .FALSE.
   end do  
-!$cuf kernel do(2) 
+!$acc parallel loop 
   DO ii = 1, npwx*npol
     DO jj = 1, nbnd
       psi_d(ii,jj) = evc_d(ii,jj)
@@ -143,7 +172,7 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 #if defined(__MPI)
   IF ( nproc_ortho == 1 ) THEN
 #endif
-     CALL rotate_HSpsi_k_gpu (  npwx, npw, nbnd, nbnd, npol, psi_d, hpsi_d, overlap, spsi_d, eig_d )
+     CALL rotate_HSpsi_k_acc (  npwx, npw, nbnd, nbnd, npol, psi_d, hpsi_d, overlap, spsi_d, eig_d )
 #if defined(__MPI)
   ELSE
 !civn 2fix
@@ -197,13 +226,13 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
      lbnd = 1; kbnd = 1
      DO ibnd = 1, ntrust ! pack unconverged roots in the available space
         IF (.NOT.conv(ibnd) ) THEN
-!$cuf kernel do(1)
+!$acc parallel loop 
            DO ii = 1, npwx*npol
              psi_d (ii,nbase+kbnd)  = psi_d(ii,ibnd)
              hpsi_d(ii,nbase+kbnd) = hpsi_d(ii,ibnd)
              spsi_d(ii,nbase+kbnd) = spsi_d(ii,ibnd)
            END DO 
-!$cuf kernel do(1)
+!$acc parallel loop
            DO ii = 1, 1
              ew_d(kbnd) = eig_d(ibnd) 
            END DO 
@@ -212,19 +241,19 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
         END IF
      END DO
      DO ibnd = nbnd+1, nbase   ! add extra vectors if it is the case
-!$cuf kernel do(1)
+!$acc parallel loop
         DO ii = 1, npwx*npol
           psi_d (ii,nbase+kbnd)  = psi_d(ii,ibnd)
           hpsi_d(ii,nbase+kbnd) = hpsi_d(ii,ibnd)
           spsi_d(ii,nbase+kbnd) = spsi_d(ii,ibnd)
         END DO
-!$cuf kernel do(1)
+!$acc parallel loop 
         DO ii = 1, 1
           ew_d(kbnd) = eig_d(last_unconverged)
         END DO 
         lbnd=lbnd+1 ; kbnd=kbnd+recv_counts(mod(lbnd-2,nbgrp)+1); if (kbnd>nactive) kbnd=kbnd+1-nactive
      END DO
-!$cuf kernel do(2)
+!$acc parallel loop 
      DO jj = 1, how_many  
        kk = jj + ibnd_start - 1
        DO ii = 1, npwx*npol
@@ -233,7 +262,7 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
          spsi_d(ii,nbase+jj) = spsi_d(ii,nbase+kk)
        END DO
      END DO
-!$cuf kernel do(1)
+!$acc parallel loop 
      DO ii = 1, how_many
        ew_d(ii) = ew_d(ii+ibnd_start-1)
      END DO 
@@ -242,14 +271,14 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
      !write (6,*) ' check nactive = ', lbnd, nactive, nconv
      if (lbnd .ne. nactive+1 ) stop ' nactive check FAILED '
 
-     CALL bpcg_k_gpu(hs_psi_gpu, g_1psi_gpu, psi_d, spsi_d, npw, npwx, nbnd, npol, how_many, &
+     CALL bpcg_k_acc(hs_psi_gpu, g_1psi_gpu, psi_d, spsi_d, npw, npwx, nbnd, npol, how_many, &
                 psi_d(:,nbase+1), hpsi_d(:,nbase+1), spsi_d(:,nbase+1), ethr, ew_d(1), nhpsi)
 !
      CALL start_clock( 'paro:mp_bar' ); 
      CALL mp_barrier(inter_bgrp_comm)
      CALL stop_clock( 'paro:mp_bar' ); 
      CALL start_clock( 'paro:mp_sum' ); 
-!$cuf kernel do(2)
+!$acc parallel loop 
      DO ii = 1, npwx*npol
        DO jj = nbase+1, nbase+how_many  
          kk = jj + ibnd_start - 1
@@ -267,7 +296,7 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 #if defined(__MPI)
      IF ( nproc_ortho == 1 ) THEN
 #endif
-        CALL rotate_HSpsi_k_gpu ( npwx, npw, ndiag, ndiag, npol, psi_d, hpsi_d, overlap, spsi_d, ew_d )
+        CALL rotate_HSpsi_k_acc ( npwx, npw, ndiag, ndiag, npol, psi_d, hpsi_d, overlap, spsi_d, ew_d )
 #if defined(__MPI)
      ELSE
 !civn 2fix
@@ -288,17 +317,17 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
      ! only the first nbnd eigenvalues are relevant for convergence
      ! but only those that have actually been corrected should be trusted
      conv(1:nbnd) = .FALSE.
-!$cuf kernel do(1)
+!$acc parallel loop 
      do ii = 1, nbnd
        conv_d(ii) = .FALSE.
      end do 
-!$cuf kernel do(1)
+!$acc parallel loop 
      DO ii = 1, ntrust
        conv_d(ii) = ABS(ew_d(ii) - eig_d(ii)).LT.ethr 
      END DO 
      conv = conv_d
      nconv = COUNT(conv(1:ntrust)) ; notconv = nbnd - nconv
-!$cuf kernel do(1)
+!$acc parallel loop 
      DO ii = 1, nbnd
        eig_d(ii)  = ew_d(ii)
      END DO 
@@ -306,7 +335,7 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   END DO ParO_loop
 
-!$cuf kernel do(2)
+!$acc parallel loop 
   DO ii = 1, npwx*npol
     DO jj = 1, nbnd  
       evc_d(ii,jj) = psi_d(ii,jj)
@@ -323,4 +352,4 @@ SUBROUTINE paro_k_new_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   CALL stop_clock( 'paro_k' ); !write (6,*) ' exit paro diag'
 
-END SUBROUTINE paro_k_new_gpu
+END SUBROUTINE paro_k_new_acc

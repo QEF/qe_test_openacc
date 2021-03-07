@@ -105,7 +105,7 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
   INTEGER :: ii, jj  ! cuf kernel indeces
   REAL(DP) :: tmp  
 #if defined (__CUDA)
-  attributes(device) :: psi_d, hpsi_d, spsi_d, psi0_d, spsi0_d, spsi0vec_d
+  attributes(device) :: psi_d, hpsi_d, spsi_d, psi0_d, spsi0_d!, spsi0vec_d
   attributes(device) :: e_d 
   attributes(device) :: b_d, p_d, hp_d, sp_d, z_d
 #endif 
@@ -125,6 +125,7 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
   ALLOCATE( p_d(kdmx,block_size), hp_d(kdmx,block_size), sp_d(kdmx,block_size) )
   ALLOCATE( spsi0vec_d(nbnd, block_size) )
   ALLOCATE( alpha( block_size ) )
+!$acc data create( spsi0vec_d(nbnd, block_size) )
   !
   done    = 0  ! the number of correction vectors already solved
   nactive = 0  ! the number of correction vectors currently being updated
@@ -150,11 +151,13 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
         end do
      !- project on conduction bands
         CALL start_clock( 'pcg:ortho' )
+!$acc host_data use_device(spsi0vec_d)
         CALL gpu_ZGEMM( 'C', 'N', nbnd, nnew, kdim, ONE, spsi0_d, kdmx, z_d(:,nactive+1), kdmx, ZERO, &
                                                                                         spsi0vec_d, nbnd )
         CALL mp_sum( spsi0vec_d, intra_bgrp_comm )
         CALL gpu_ZGEMM( 'N', 'N', kdim, nnew, nbnd, (-1.D0,0.D0), psi0_d, kdmx, spsi0vec_d, nbnd, ONE, &
                                                                                       z_d(:,nactive+1), kdmx )
+!$acc end host_data
         CALL stop_clock( 'pcg:ortho' )
      !-
         do l=nactive+1,nactive+nnew; i=l+done
@@ -236,9 +239,11 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
      end do
   !- project on conduction bands
      CALL start_clock( 'pcg:ortho' )
+!$acc host_data use_device(spsi0vec_d)
      CALL gpu_ZGEMM( 'C', 'N', nbnd, nactive, kdim, ONE, spsi0_d, kdmx, z_d, kdmx, ZERO, spsi0vec_d, nbnd )
      CALL mp_sum( spsi0vec_d, intra_bgrp_comm )
      CALL gpu_ZGEMM( 'N', 'N', kdim, nactive, nbnd, (-1.D0,0.D0), psi0_d, kdmx, spsi0vec_d, nbnd, ONE, z_d, kdmx )
+!$acc end host_data 
      CALL stop_clock( 'pcg:ortho' )
   !-
      do l = 1, nactive; i=l+done
@@ -380,6 +385,7 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
   !write (6,*) ' exit  pcg loop'
 
   DEALLOCATE( spsi0vec_d )
+!$acc end data 
   DEALLOCATE( b_d, p_d, hp_d, sp_d, z_d )
   DEALLOCATE( ethr_cg, ff, ff0, cg_iter )
   DEALLOCATE( g0, g1, g2, gamma )

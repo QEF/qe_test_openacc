@@ -13,9 +13,6 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
   !
   ! ... Serial version of rotate_wfc for colinear, k-point calculations
   !
-#if defined (__CUDA)
-  USE cudafor
-#endif
   USE util_param,    ONLY : DP
   USE mp_bands_util, ONLY : intra_bgrp_comm, inter_bgrp_comm, root_bgrp_id, nbgrp, my_bgrp_id, &
                             me_bgrp, root_bgrp
@@ -50,21 +47,19 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
   COMPLEX(DP), ALLOCATABLE :: aux_d(:,:)
   COMPLEX(DP), ALLOCATABLE :: hh_d(:,:), ss_d(:,:), vv_d(:,:)
   REAL(DP),    ALLOCATABLE :: en_d(:)
-#if defined (__CUDA)
-  attributes(device) :: aux_d, psi_d, hpsi_d, spsi_d 
-  attributes(device) :: hh_d, ss_d, vv_d, en_d, e_d
-#endif
+  !
+!$acc  data deviceptr( psi_d(npwx*npol,nstart), hpsi_d(npwx*npol,nstart), spsi_d(npwx*npol,nstart), e_d(nbnd)  )
+  IF ( overlap .AND..NOT.present(spsi_d) ) call errore( 'rotHSw','spsi_d array needed with overlap=.TRUE.',1)
 !civn 
   write(*,*) 'using rotate_HSpsi_k_acc'
 !
-  !
-  IF ( overlap .AND..NOT.present(spsi_d) ) call errore( 'rotHSw','spsi_d array needed with overlap=.TRUE.',1)
   !
   call start_clock('rotHSw'); !write(*,*) 'start rotHSw' ; FLUSH(6)
   !
   if (npol == 2 .and. npw < npwx ) then ! pack wfcs so that pw's are contiguous 
     call start_clock('rotHSw:move'); !write(*,*) 'start rotHSw:move' ; FLUSH(6)
     ALLOCATE ( aux_d ( npwx, nstart ) )
+!$acc data create( aux_d( npwx, nstart ) ) 
 !$acc parallel loop 
     DO ii = 1, npw
       DO jj = 1, nstart 
@@ -101,6 +96,7 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
         spsi_d(npw+ii,jj) = aux_d(ii,jj)
       END DO 
     END DO 
+!$acc end data
     DEALLOCATE( aux_d )
     call stop_clock('rotHSw:move'); !write(*,*) 'stop rotHSw:move' ; FLUSH(6)
   end if
@@ -112,6 +108,8 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
   ALLOCATE( ss_d( nstart, nstart ) )
   ALLOCATE( vv_d( nstart, nstart ) )
   ALLOCATE( en_d( nstart ) )
+!$acc data create(hh_d(nstart,nstart), ss_d(nstart,nstart), vv_d(nstart,nstart), en_d(nstart) )
+!$acc host_data use_device(hh_d, ss_d, vv_d, en_d ) 
   !
   ! ... Set up the Hamiltonian and Overlap matrix on the subspace :
   !
@@ -174,6 +172,8 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
   CALL divide_all(inter_bgrp_comm,nbnd,n_start,n_end,recv_counts,displs)
 
   ALLOCATE( aux_d ( kdmx, nbnd ) )
+!$acc data create( aux_d(kdmx,nbnd) ) 
+!$acc host_data use_device( aux_d ) 
 
   my_n = n_end - n_start + 1; !write (*,*) nstart,n_start,n_end
   if (n_start .le. n_end) &
@@ -208,10 +208,14 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
      CALL dev_memcpy(spsi_d, psi_d, [1, kdmx], 1, [n_start,n_end])
   END IF
 
+!$acc end host_data
+!$acc end data
   DEALLOCATE( aux_d )
   CALL mp_type_free( column_type )
   call stop_clock('rotHSw:evc'); !write(*,*) 'stop rotHSw:evc' ; FLUSH(6)
   !
+!$acc end host_data 
+!$acc end data 
   DEALLOCATE( vv_d )
   DEALLOCATE( ss_d )
   DEALLOCATE( hh_d )
@@ -226,25 +230,26 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
   if (npol== 2 .and. npw < npwx ) then   ! unpack wfcs to its original order
     call start_clock('rotHSw:move'); !write(*,*) 'start rotHSw:move' ; FLUSH(6)
     ALLOCATE ( aux_d ( npwx, nbnd ) )
-!$acc parallel loop 
+!$acc data create( aux_d ( npwx, nbnd ) ) 
+!$acc parallel loop
     DO ii = 1, npw
       DO jj = 1, nbnd 
         aux_d(ii,jj) = psi_d (npw+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop
     DO ii = 1, npw
       DO jj = 1, nbnd 
         psi_d(npwx+ii,jj) = aux_d(ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop
     DO ii = 1, npw
       DO jj = 1, nbnd 
         aux_d(ii,jj) = hpsi_d(npw+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop
     DO ii = 1, npw
       DO jj = 1, nbnd 
         hpsi_d(npwx+ii,jj) = aux_d(ii,jj)
@@ -280,10 +285,12 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
         spsi_d(ii,jj) = ZERO
       END DO 
     END DO 
+!$acc end data
     DEALLOCATE( aux_d )
     call stop_clock('rotHSw:move'); !write(*,*) 'stop rotHSw:move' ; FLUSH(6)
   end if
   !
+!$acc end data
   RETURN
   !
 END SUBROUTINE rotate_HSpsi_k_acc

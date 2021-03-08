@@ -59,9 +59,6 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
   ! in order to avoid un-necessary HSpsi evaluations this version assumes psi,hpsi and spsi are all
   ! provided in input and return their estimate for further use
   !
-#if defined (__CUDA)
-  USE cudafor
-#endif
   USE util_param,    ONLY : DP, stdout
   USE mp_bands_util, ONLY : intra_bgrp_comm
   USE mp,            ONLY : mp_sum
@@ -104,11 +101,6 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
   !
   INTEGER :: ii, jj  ! cuf kernel indeces
   REAL(DP) :: tmp  
-#if defined (__CUDA)
-  attributes(device) :: psi_d, hpsi_d, spsi_d, psi0_d, spsi0_d!, spsi0vec_d
-  attributes(device) :: e_d 
-  attributes(device) :: b_d, p_d, hp_d, sp_d, z_d
-#endif 
   !
   CALL start_clock( 'pcg' ); !write (6,*) ' enter pcg' , e(1:2), 'npol = ', npol ; FLUSH(6)
 !civn 
@@ -121,12 +113,16 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
   !
   ALLOCATE( g0( block_size ), g1( block_size ), g2( block_size ), gamma( block_size ) )
   ALLOCATE( ethr_cg( block_size ), ff( block_size ), ff0( block_size ), cg_iter( block_size ) )
+  ALLOCATE( alpha( block_size ) )
+  !
   ALLOCATE( z_d( kdmx, block_size ), b_d( kdmx, block_size ) )
   ALLOCATE( p_d(kdmx,block_size), hp_d(kdmx,block_size), sp_d(kdmx,block_size) )
   ALLOCATE( spsi0vec_d(nbnd, block_size) )
-  ALLOCATE( alpha( block_size ) )
-!$acc data create( spsi0vec_d(nbnd, block_size) )
-!$acc host_data use_device(spsi0vec_d)
+!$acc  data create(spsi0vec_d(nbnd,block_size),b_d( kdmx,block_size),p_d(kdmx,block_size), &
+!$acc&             hp_d(kdmx,block_size),sp_d(kdmx,block_size),z_d(kdmx,block_size)) &
+!$acc&      deviceptr( e_d(nvec), psi0_d(npwx*npol,nbnd), spsi0_d(npwx*npol,nbnd), psi_d(npwx*npol,nvec), & 
+!$acc&                 hpsi_d(npwx*npol,nvec),spsi_d(npwx*npol,nvec) ) 
+!$acc  host_data use_device( spsi0vec_d, b_d, p_d, hp_d, sp_d, z_d )
   !
   done    = 0  ! the number of correction vectors already solved
   nactive = 0  ! the number of correction vectors currently being updated
@@ -207,7 +203,11 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
      CALL stop_clock( 'pcg:hs_1psi' )
      do l = 1, nactive; i=l+done
         gamma(l) = gpu_DDOT( 2*kdim, p_d(:,l), 1, hp_d(:,l), 1 )
-        gamma(l) = gamma(l) - e_d(i) * gpu_DDOT( 2*kdim, p_d(:,l), 1, sp_d(:,l), 1 ) 
+!$acc parallel loop
+        do ii = 1, 1
+          tmp = e_d(i)
+        end do 
+        gamma(l) = gamma(l) - tmp * gpu_DDOT( 2*kdim, p_d(:,l), 1, sp_d(:,l), 1)  
      end do
      CALL mp_sum( gamma(1:nactive), intra_bgrp_comm ) ! gamma = < p | hp - e sp >
 
@@ -223,9 +223,12 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
           hpsi_d(ii,i) = hpsi_d(ii,i) + tmp * hp_d(ii,l)    ! updated solution
           spsi_d(ii,i) = spsi_d(ii,i) + tmp * sp_d(ii,l)    ! updated solution
         END DO 
-
+!$acc parallel loop
+        DO ii = 1, 1
+          tmp = e_d(i)
+        END DO 
         g2(l) = gpu_DDOT(2*kdim,z_d(:,l),1,b_d(:,l),1) &
-                + e_d(i) * gpu_DDOT(2*kdim,z_d(:,l),1,spsi_d(:,i),1) &
+                + tmp * gpu_DDOT(2*kdim,z_d(:,l),1,spsi_d(:,i),1) &
                 - gpu_DDOT(2*kdim,z_d(:,l),1,hpsi_d(:,i),1)
      end do
      CALL mp_sum( g2(1:nactive), intra_bgrp_comm )    ! g2 = < old z | new gradient b + e spsi - hpsi >
@@ -244,13 +247,21 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
      CALL stop_clock( 'pcg:ortho' )
   !-
      do l = 1, nactive; i=l+done
+!$acc parallel loop
+        DO ii = 1, 1 
+          tmp = e_d(i)
+        END DO 
         g1(l) = gpu_DDOT(2*kdim,z_d(:,l),1,b_d(:,l),1) &
-                + e_d(i) * gpu_DDOT(2*kdim,z_d(:,l),1,spsi_d(:,i),1) &
+                + tmp * gpu_DDOT(2*kdim,z_d(:,l),1,spsi_d(:,i),1) &
                 - gpu_DDOT(2*kdim,z_d(:,l),1,hpsi_d(:,i),1)
      end do
      CALL mp_sum( g1(1:nactive), intra_bgrp_comm )   ! g1 = < new z | new gradient b + e spsi - hpsi >
      do l = 1, nactive; i = l + done                 ! evaluate the function ff
-        ff(l) = -0.5_DP * ( e_d(i)*gpu_DDOT(2*kdim,psi_d(:,i),1,spsi_d(:,i),1)&
+!$acc parallel loop
+        DO ii = 1, 1 
+          tmp = e_d(i)
+        END DO 
+        ff(l) = -0.5_DP * ( tmp*gpu_DDOT(2*kdim,psi_d(:,i),1,spsi_d(:,i),1)&
                                                 -gpu_DDOT(2*kdim,psi_d(:,i),1,hpsi_d(:,i),1) )
         ff(l) = ff(l) - gpu_DDOT(2*kdim,psi_d(:,i),1,b_d(:,l),1)
      end do
@@ -301,12 +312,18 @@ SUBROUTINE bpcg_k_acc( hs_psi_gpu, g_1psi_gpu, psi0_d, spsi0_d, npw, npwx, nbnd,
              spsi_d(ii,i) = sp_d(ii,l)
            END DO 
 
+!$acc parallel loop
+        DO ii = 1, 1 
            ee = e_d(done+newdone)       
+        END DO 
 !$acc parallel loop
            DO ii = 1, 1
              e_d(done+newdone) = e_d(i)      
            END DO 
+!$acc parallel loop
+        DO ii = 1, 1 
            e_d(i) = ee
+        END DO 
 
            !write(6,*) ' overwrite converged p/hp/etc l = ',l, ' with newdone = ',newdone
            ! move information of the swapped active vector in the right place to keep going

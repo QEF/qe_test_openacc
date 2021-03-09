@@ -39,7 +39,6 @@
 ! The file is written mainly by Stefano de Gironcoli and Yan Pan.
 !
 !-------------------------------------------------------------------------------
-!civn
 SUBROUTINE wrap_paro_k_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
                    npwx, npw, nbnd, npol, evc, eig, btype, ethr, notconv, nhpsi )
   USE util_param,          ONLY : DP, stdout
@@ -70,10 +69,7 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
                    npwx, npw, nbnd, npol, evc_d, eig_d, btype, ethr, notconv, nhpsi )
   !-------------------------------------------------------------------------------
   !paro_flag = 1: modified parallel orbital-updating method
-
-#if defined (__CUDA)
-  USE cudafor
-#endif
+  !
   ! global variables
   USE util_param,          ONLY : DP, stdout
   USE mp_bands_util,       ONLY : inter_bgrp_comm, nbgrp, my_bgrp_id
@@ -127,11 +123,6 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
   REAL(DP), ALLOCATABLE    :: ew_d(:)
   COMPLEX(DP), ALLOCATABLE :: psi_d(:,:), hpsi_d(:,:), spsi_d(:,:)
   LOGICAL, ALLOCATABLE     :: conv_d(:)
-#if defined (__CUDA)
-  attributes(device) :: evc_d, eig_d
-  attributes(device) :: psi_d, hpsi_d, spsi_d, ew_d
-  attributes(device) :: conv_d 
-#endif  
 !civn 
   write(*,*) 'using paro_k_new_acc'
 !
@@ -145,11 +136,14 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
   !
   CALL start_clock( 'paro_k' ); !write (6,*) ' enter paro diag'
 
+!$acc data deviceptr( evc_d(npwx*npol,nbnd), eig_d(nbnd) )
   CALL mp_type_create_column_section(evc_d(1,1), 0, npwx*npol, npwx*npol, column_type)
 
   ALLOCATE ( ew_d(nvecx), conv(nbnd) )
   ALLOCATE ( conv_d(nbnd) )
   ALLOCATE ( psi_d(npwx*npol,nvecx), hpsi_d(npwx*npol,nvecx), spsi_d(npwx*npol,nvecx) )
+!$acc data create(  psi_d(npwx*npol,nvecx), hpsi_d(npwx*npol,nvecx), spsi_d(npwx*npol,nvecx), ew_d(nvecx), conv_d(nbnd) )
+!$acc host_data use_device( psi_d,  hpsi_d, spsi_d, ew_d, conv_d ) 
 
   CALL start_clock( 'paro:init' ); 
   conv(:) =  .FALSE. ; nconv = COUNT ( conv(:) )
@@ -325,7 +319,10 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
      DO ii = 1, ntrust
        conv_d(ii) = ABS(ew_d(ii) - eig_d(ii)).LT.ethr 
      END DO 
-     conv = conv_d
+!$acc parallel loop
+     DO ii = 1, 1
+       conv = conv_d
+     END DO 
      nconv = COUNT(conv(1:ntrust)) ; notconv = nbnd - nconv
 !$acc parallel loop 
      DO ii = 1, nbnd
@@ -344,6 +341,9 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   CALL mp_sum(nhpsi,inter_bgrp_comm)
 
+!$acc end host_data
+!$acc end data
+!$acc end data
   DEALLOCATE ( ew_d, conv )
   DEALLOCATE ( conv_d )
   DEALLOCATE ( psi_d, hpsi_d, spsi_d )

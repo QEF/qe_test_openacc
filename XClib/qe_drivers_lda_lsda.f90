@@ -20,16 +20,77 @@ MODULE qe_drivers_lda_lsda
   USE exch_lda
   USE corr_lda
   !
+  USE exch_lda_acc
+  !
   IMPLICIT NONE
   !
   SAVE
   !
   PRIVATE
   !
-  PUBLIC :: xc_lda, xc_lsda
+  PUBLIC :: xc_lda, xc_lsda, xc_lda_acc
   !
   !
 CONTAINS
+!
+!----------------------------------------------------------------------------
+SUBROUTINE xc_lda_acc( length, rho_in, ex, ec, vx, vc ) 
+  !--------------------------------------------------------------------------
+  ! Small testing routine to check how acc works in XClib.
+  ! It only calculates slater exchange term, but, before,
+  ! pushing the full library acc enabled the issue below
+  ! needs to be clarified.
+  ! -uncomment line 191 in xc_wrapper_lda_lsda to use this.
+  ! -to bring out the issue you can just run any QE pw test
+  !  that uses non zero LDA dft term.
+!********************************************************
+!  CASES:    1- I compile QE with flags: -acc -Minfo
+! (fabrizio)    then it compiles but do not accelerate the loop (in the compilation infos:
+!               'loop not parallelized/vectorized: contains call'
+!            2- I compile with in addition the flag: -ta=tesla
+!               then it compiles smootly, but at runtime the program tops and exits with a
+!               generic error message when it comes to the acc loop below.
+!
+!            NOTE: I wrote a small program that uses the same xc routines and modules as 
+!                  here, but without putting them in a library (xclib.a): it works smootly.
+!********************************************************
+
+  use openacc
+  USE exch_lda_acc
+  
+  IMPLICIT NONE
+  !
+  INTEGER, INTENT(IN) :: length
+  REAL(8), INTENT(IN),  DIMENSION(length) :: rho_in
+  REAL(8), INTENT(OUT), DIMENSION(length) :: ex
+  REAL(8), INTENT(OUT), DIMENSION(length) :: vx
+  REAL(8), INTENT(OUT), DIMENSION(length) :: ec
+  REAL(8), INTENT(OUT), DIMENSION(length) :: vc
+  !
+  ! ... local variables
+  !
+  INTEGER  :: ir
+  !
+!$acc data copyin(rho_in), copyout(ex, vx, ec, vc )
+!$acc kernels loop 
+  DO ir = 1, length
+     !
+     
+     CALL slater_d( rho_in(ir), ex(ir), vx(ir) )   
+     !   
+     ec(ir) = 0.d0
+     vc(ir) = 0.d0
+ 
+  ENDDO
+!$acc end kernels loop
+!$acc end data
+
+  !
+
+  RETURN
+!
+END SUBROUTINE xc_lda_acc
+
 !
 !----------------------------------------------------------------------------
 SUBROUTINE xc_lda( length, rho_in, ex_out, ec_out, vx_out, vc_out )

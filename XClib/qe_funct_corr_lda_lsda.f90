@@ -6,14 +6,15 @@
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
 !-------------------------------------------------------------------------
-MODULE corr_lda !<GPU:corr_lda=>corr_lda_gpu>
+MODULE corr_lda
 !-------------------------------------------------------------------------
 !! LDA correlation functionals
 !
 CONTAINS
 !
 !-------------------------------------------------------------------------
-SUBROUTINE pz( rs, iflag, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE pz( rs, iflag, ec, vc )
+!$acc routine (pz) seq
   !-----------------------------------------------------------------------
   !! LDA parametrization from Monte Carlo DATA:
   !
@@ -72,7 +73,8 @@ END SUBROUTINE pz
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE pzKZK( rs, ec, vc, vol )                    !<GPU:DEVICE>
+SUBROUTINE pzKZK( rs, ec, vc, vol )
+!$acc routine (pzKZK) seq
   !-----------------------------------------------------------------------
   !! LDA parametrization from Monte Carlo DATA:
   !
@@ -187,7 +189,8 @@ END SUBROUTINE pzKZK
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE vwn( rs, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE vwn( rs, ec, vc )
+!$acc routine (vwn) seq
   !-----------------------------------------------------------------------
   !! S.H. Vosko, L. Wilk, and M. Nusair, Can. J. Phys. 58, 1200 (1980).
   !
@@ -233,7 +236,8 @@ END SUBROUTINE vwn
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE vwn1_rpa( rs, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE vwn1_rpa( rs, ec, vc )
+!$acc routine (vwn1_rpa) seq
   !-----------------------------------------------------------------------
   !! S.H. Vosko, L. Wilk, and M. Nusair, Can. J. Phys. 58, 1200 (1980).
   !
@@ -278,7 +282,8 @@ END SUBROUTINE vwn1_rpa
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE lyp( rs, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE lyp( rs, ec, vc )
+!$acc routine (lyp) seq
   !-----------------------------------------------------------------------
   !! C. Lee, W. Yang, and R.G. Parr, PRB 37, 785 (1988).
   !! LDA part only.
@@ -315,7 +320,8 @@ END SUBROUTINE lyp
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE pw( rs, iflag, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE pw( rs, iflag, ec, vc )
+!$acc routine (pw) seq
   !-----------------------------------------------------------------------
   !! * iflag=1: J.P. Perdew and Y. Wang, PRB 45, 13244 (1992)
   !! * iflag=2: G. Ortiz and P. Ballone, PRB 50, 1391 (1994)
@@ -385,7 +391,8 @@ END SUBROUTINE pw
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE wignerc( rs, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE wignerc( rs, ec, vc )
+!$acc routine (wignerc) seq
   !-----------------------------------------------------------------------
   !! Wigner correlation.
   !
@@ -418,7 +425,8 @@ END SUBROUTINE wignerc
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE hl( rs, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE hl( rs, ec, vc )
+!$acc routine (hl) seq
   !-----------------------------------------------------------------------
   !! L. Hedin and  B.I. Lundqvist,  J. Phys. C 4, 2064 (1971).
   !
@@ -450,7 +458,8 @@ END SUBROUTINE hl
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE gl( rs, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE gl( rs, ec, vc )
+!$acc routine (gl) seq
   !---------------------------------------------------------------------
   !! O. Gunnarsson and B. I. Lundqvist, PRB 13, 4274 (1976).
   !

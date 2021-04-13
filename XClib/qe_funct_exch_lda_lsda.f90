@@ -6,14 +6,16 @@
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
 !----------------------------------------------------------------------
-MODULE exch_lda  !<GPU:exch_lda=>exch_lda_gpu>
+MODULE exch_lda
 !----------------------------------------------------------------------
 !! LDA exchange functionals.
+!
 !
 CONTAINS
 !
 !-----------------------------------------------------------------------
-SUBROUTINE slater( rs, ex, vx )                  !<GPU:DEVICE>
+SUBROUTINE slater( rs, ex, vx )
+!$acc routine (slater) seq
   !---------------------------------------------------------------------
   !! Slater exchange with alpha=2/3
   !
@@ -30,10 +32,10 @@ SUBROUTINE slater( rs, ex, vx )                  !<GPU:DEVICE>
   !
   ! ... local variables
   !
-  REAL(DP), PARAMETER   :: f = -0.687247939924714_DP, alpha = 2.0_DP/3.0_DP
+  REAL(DP), PARAMETER   :: f = -0.687247939924714d0, alpha = 2.0d0/3.0d0
   !                        f = -9/8*(3/2pi)^(2/3)
   ex = f * alpha / rs
-  vx = 4._DP / 3._DP * f * alpha / rs
+  vx = 4.d0 / 3.d0 * f * alpha / rs
   !
   RETURN
   !
@@ -41,7 +43,8 @@ END SUBROUTINE slater
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE slater1( rs, ex, vx )                 !<GPU:DEVICE>
+SUBROUTINE slater1( rs, ex, vx )
+!$acc routine (slater1) seq
   !---------------------------------------------------------------------
   !! Slater exchange with alpha=1, corresponding to -1.374/r_s Ry.
   !! Used to recover old results.
@@ -70,7 +73,8 @@ END SUBROUTINE slater1
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE slater_rxc( rs, ex, vx )                 !<GPU:DEVICE>
+SUBROUTINE slater_rxc( rs, ex, vx )
+!$acc routine (slater_rxc) seq
   !---------------------------------------------------------------------
   !! Slater exchange with alpha=2/3 and Relativistic exchange.
   !
@@ -123,7 +127,8 @@ END SUBROUTINE slater_rxc
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE slaterKZK( rs, ex, vx, vol )                 !<GPU:DEVICE>
+SUBROUTINE slaterKZK( rs, ex, vx, vol )
+!$acc routine (slaterKZK) seq
   !---------------------------------------------------------------------
   !! Slater exchange with alpha=2/3, Kwee, Zhang and Krakauer KE
   !! correction.
@@ -138,7 +143,7 @@ SUBROUTINE slaterKZK( rs, ex, vx, vol )                 !<GPU:DEVICE>
   !! Exchange energy (per unit volume)
   REAL(DP), INTENT(OUT) :: vx
   !! Exchange potential
-  REAL(DP) :: vol                                         !<GPU:VALUE>
+  REAL(DP) :: vol
   !! Finite size volume element
   !
   ! ... local variables

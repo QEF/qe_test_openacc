@@ -20,8 +20,6 @@ MODULE qe_drivers_lda_lsda
   USE exch_lda
   USE corr_lda
   !
-  USE exch_lda_acc
-  !
   IMPLICIT NONE
   !
   SAVE
@@ -32,65 +30,6 @@ MODULE qe_drivers_lda_lsda
   !
   !
 CONTAINS
-!
-!----------------------------------------------------------------------------
-SUBROUTINE xc_lda_acc( length, rho_in, ex, ec, vx, vc ) 
-  !--------------------------------------------------------------------------
-  ! Small testing routine to check how acc works in XClib.
-  ! It only calculates slater exchange term, but, before,
-  ! pushing the full library acc enabled the issue below
-  ! needs to be clarified.
-  ! -uncomment line 191 in xc_wrapper_lda_lsda to use this.
-  ! -to bring out the issue you can just run any QE pw test
-  !  that uses non zero LDA dft term.
-!********************************************************
-!  CASES:    1- I compile QE with flags: -acc -Minfo
-! (fabrizio)    then it compiles but do not accelerate the loop (in the compilation infos:
-!               'loop not parallelized/vectorized: contains call'
-!            2- I compile with in addition the flag: -ta=tesla
-!               then it compiles smootly, but at runtime the program tops and exits with a
-!               generic error message when it comes to the acc loop below.
-!
-!            NOTE: I wrote a small program that uses the same xc routines and modules as 
-!                  here, but without putting them in a library (xclib.a): it works smootly.
-!********************************************************
-
-  use openacc
-  USE exch_lda_acc
-  
-  IMPLICIT NONE
-  !
-  INTEGER, INTENT(IN) :: length
-  REAL(8), INTENT(IN),  DIMENSION(length) :: rho_in
-  REAL(8), INTENT(OUT), DIMENSION(length) :: ex
-  REAL(8), INTENT(OUT), DIMENSION(length) :: vx
-  REAL(8), INTENT(OUT), DIMENSION(length) :: ec
-  REAL(8), INTENT(OUT), DIMENSION(length) :: vc
-  !
-  ! ... local variables
-  !
-  INTEGER  :: ir
-  !
-!$acc data copyin(rho_in), copyout(ex, vx, ec, vc )
-!$acc kernels loop 
-  DO ir = 1, length
-     !
-     
-     CALL slater_d( rho_in(ir), ex(ir), vx(ir) )   
-     !   
-     ec(ir) = 0.d0
-     vc(ir) = 0.d0
- 
-  ENDDO
-!$acc end kernels loop
-!$acc end data
-
-  !
-
-  RETURN
-!
-END SUBROUTINE xc_lda_acc
-
 !
 !----------------------------------------------------------------------------
 SUBROUTINE xc_lda( length, rho_in, ex_out, ec_out, vx_out, vc_out )
@@ -317,6 +256,207 @@ SUBROUTINE xc_lda( length, rho_in, ex_out, ec_out, vx_out, vc_out )
 END SUBROUTINE xc_lda
 !
 !
+!----------------------------------------------------------------------------
+SUBROUTINE xc_lda_acc( length, rho_in, ex_out, ec_out, vx_out, vc_out )
+  !--------------------------------------------------------------------------
+  !! xc_lda - openacc test version
+  !
+  IMPLICIT NONE
+  !
+  INTEGER,  INTENT(IN) :: length
+  !! length of the I/O arrays
+  REAL(DP), INTENT(IN),  DIMENSION(length) :: rho_in
+  !! Charge density
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: ex_out
+  !! \(\epsilon_x(rho)\) ( NOT \(E_x(\text{rho})\) )
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: vx_out
+  !! \(dE_x(\text{rho})/d\text{rho}\)  ( NOT \(d\epsilon_x(\text{rho})/d\text{rho}\) )
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: ec_out
+  !! \(\epsilon_c(rho)\) ( NOT \(E_c(\text{rho})\) )
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: vc_out
+  !! \(dE_c(\text{rho})/d\text{rho}\)  ( NOT \(d\epsilon_c(\text{rho})/d\text{rho}\) )
+  !
+  ! ... local variables
+  !
+  INTEGER  :: ir
+  REAL(DP) :: rho, rs
+  REAL(DP) :: ex, ex_, ec, ec_
+  REAL(DP) :: vx, vx_, vc, vc_
+  REAL(DP), PARAMETER :: third = 1.0_DP/3.0_DP, &
+                         pi34 = 0.6203504908994_DP, e2 = 2.0_DP
+  !                      pi34 = (3/4pi)^(1/3)
+  !
+!$acc data copyin(rho_in), copyout(ex_out, vx_out, ec_out, vc_out)
+!$acc parallel loop
+  DO ir = 1, length
+     !
+     rho = ABS(rho_in(ir))
+     !
+     ! ... RHO THRESHOLD
+     !
+     IF ( rho > rho_threshold_lda ) THEN
+        rs = pi34 / rho**third
+     ELSE
+        ex_out(ir) = 0.0_DP  ;  ec_out(ir) = 0.0_DP
+        vx_out(ir) = 0.0_DP  ;  vc_out(ir) = 0.0_DP
+        CYCLE
+     ENDIF
+     !
+     ! ... EXCHANGE
+     !
+     SELECT CASE( iexch )
+     CASE( 1 )                      ! 'sla'
+        !
+        CALL slater( rs, ex, vx )
+        !
+     CASE( 2 )                      ! 'sl1'
+        !
+        CALL slater1( rs, ex, vx )
+        !
+     CASE( 3 )                      ! 'rxc'
+        !
+        CALL slater_rxc( rs, ex, vx )
+        !
+     CASE( 4, 5 )                   ! 'oep','hf'
+        !
+        IF ( exx_started ) THEN
+           ex = 0.0_DP
+           vx = 0.0_DP
+        ELSE
+           CALL slater( rs, ex, vx )
+        ENDIF
+        !
+     CASE( 6, 7 )                   ! 'pb0x' or 'DF-cx-0', or 'DF2-0',
+        !                           ! 'B3LYP'
+        CALL slater( rs, ex_, vx_ )
+        IF ( exx_started ) THEN
+           ex = (1.0_DP - exx_fraction) * ex_
+           vx = (1.0_DP - exx_fraction) * vx_
+        ELSE
+           ex = ex_
+           vx = vx_
+        ENDIF
+        !
+     CASE( 8 )                      ! 'sla+kzk'
+        !
+        CALL slaterKZK( rs, ex, vx, finite_size_cell_volume )
+        !
+     CASE( 9 )                      ! 'X3LYP'
+        !
+        CALL slater( rs, ex_, vx_ )
+        IF ( exx_started ) THEN
+           ex = (1.0_DP - exx_fraction) * ex_
+           vx = (1.0_DP - exx_fraction) * vx_
+        ELSE
+           ex = ex_
+           vx = vx_
+        ENDIF
+        !
+     CASE DEFAULT
+        !
+        ex = 0.0_DP
+        vx = 0.0_DP
+        !
+     END SELECT
+     !
+     !
+     ! ... CORRELATION
+     !
+     SELECT CASE( icorr )
+     CASE( 1 )
+        !
+        CALL pz( rs, 1, ec, vc )
+        !
+     CASE( 2 )
+        !
+        CALL vwn( rs, ec, vc )
+        !
+     CASE( 3 )
+        !
+        CALL lyp( rs, ec, vc )
+        !
+     CASE( 4 )
+        !
+        CALL pw( rs, 1, ec, vc )
+        !
+     CASE( 5 )
+        !
+        CALL wignerc( rs, ec, vc )
+        !
+     CASE( 6 )
+        !
+        CALL hl( rs, ec, vc )
+        !
+     CASE( 7 )
+        !
+        CALL pz( rs, 2, ec, vc )
+        ! 
+     CASE( 8 )
+        !
+        CALL pw( rs, 2, ec, vc )
+        !
+     CASE( 9 )
+        !
+        CALL gl( rs, ec, vc )
+        !
+     CASE( 10 )
+        !
+        CALL pzKZK( rs, ec, vc, finite_size_cell_volume )
+        !
+     CASE( 11 )
+        !
+        CALL vwn1_rpa( rs, ec, vc )
+        !
+     CASE( 12 )                ! 'B3LYP'
+        !
+        CALL vwn( rs, ec, vc )
+        ec = 0.19_DP * ec
+        vc = 0.19_DP * vc
+        !
+        CALL lyp( rs, ec_, vc_ )
+        ec = ec + 0.81_DP * ec_
+        vc = vc + 0.81_DP * vc_
+        !
+     CASE( 13 )                ! 'B3LYP-V1R'
+        !
+        CALL vwn1_rpa( rs, ec, vc )
+        ec = 0.19_DP * ec
+        vc = 0.19_DP * vc
+        !
+        CALL lyp( rs, ec_, vc_ )
+        ec = ec + 0.81_DP * ec_
+        vc = vc + 0.81_DP * vc_
+        !
+     CASE( 14 )                ! 'X3LYP'
+        !
+        CALL vwn1_rpa( rs, ec, vc )
+        ec = 0.129_DP * ec
+        vc = 0.129_DP * vc
+        !
+        CALL lyp( rs, ec_, vc_ )
+        ec = ec + 0.871_DP * ec_
+        vc = vc + 0.871_DP * vc_
+        !
+     CASE DEFAULT
+        !
+        ec = 0.0_DP
+        vc = 0.0_DP
+        !
+     END SELECT
+     !
+     ex_out(ir) = ex  ;  ec_out(ir) = ec
+     vx_out(ir) = vx  ;  vc_out(ir) = vc
+     !
+  ENDDO
+!$acc end parallel loop
+!$acc end data
+  !
+  !
+  RETURN
+  !
+END SUBROUTINE xc_lda_acc
+!
+!
 !-----------------------------------------------------------------------------
 SUBROUTINE xc_lsda( length, rho_in, zeta_in, ex_out, ec_out, vx_out, vc_out )
   !-----------------------------------------------------------------------------
@@ -513,5 +653,6 @@ SUBROUTINE xc_lsda( length, rho_in, zeta_in, ex_out, ec_out, vx_out, vc_out )
   RETURN
   !
 END SUBROUTINE xc_lsda
+!
 !
 END MODULE qe_drivers_lda_lsda

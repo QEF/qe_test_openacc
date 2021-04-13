@@ -18,7 +18,6 @@ qe_drivers_gga.o : xc_beef_interface.o
 qe_drivers_gga.o : xc_input_params_mod.o
 qe_drivers_lda_lsda.o : qe_funct_corr_lda_lsda.o
 qe_drivers_lda_lsda.o : qe_funct_exch_lda_lsda.o
-qe_drivers_lda_lsda.o : qe_funct_exch_lda_lsda_acc.o
 qe_drivers_lda_lsda.o : qe_kind.o
 qe_drivers_lda_lsda.o : xc_input_params_mod.o
 qe_drivers_mgga.o : qe_funct_mgga.o

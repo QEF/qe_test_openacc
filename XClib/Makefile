@@ -11,7 +11,6 @@ xc_input_params_mod.o \
 dft_mod.o \
 qe_funct_corr_lda_lsda.o \
 qe_funct_exch_lda_lsda.o \
-qe_funct_exch_lda_lsda_acc.o \
 qe_funct_corr_gga.o \
 qe_funct_exch_gga.o \
 qe_funct_mgga.o \

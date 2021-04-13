@@ -493,7 +493,8 @@ END SUBROUTINE gl
 ! ... LSDA
 !
 !-----------------------------------------------------------------------
-SUBROUTINE pz_polarized( rs, ec, vc )                    !<GPU:DEVICE>
+SUBROUTINE pz_polarized( rs, ec, vc )
+!$acc routine (pz_polarized) seq
   !-----------------------------------------------------------------------
   !! J.P. Perdew and A. Zunger, PRB 23, 5048 (1981).
   !! spin-polarized energy and potential.
@@ -548,7 +549,8 @@ END SUBROUTINE pz_polarized
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE pz_spin( rs, zeta, ec, vc_up, vc_dw )                    !<GPU:DEVICE>
+SUBROUTINE pz_spin( rs, zeta, ec, vc_up, vc_dw )
+!$acc routine (pz_spin) seq
   !-----------------------------------------------------------------------
   !! Perdew and Zunger, PRB 23, 5048 (1981). Spin polarized case.
   !
@@ -591,7 +593,8 @@ SUBROUTINE pz_spin( rs, zeta, ec, vc_up, vc_dw )                    !<GPU:DEVICE
 END SUBROUTINE pz_spin
 !
 !-------------------------------------------------------------------------------
-SUBROUTINE vwn_spin( rs, zeta, ec, vc_up, vc_dw )                    !<GPU:DEVICE>
+SUBROUTINE vwn_spin( rs, zeta, ec, vc_up, vc_dw )
+!$acc routine (vwn_spin) seq
    !------------------------------------------------------------------------------
    !! S.H. Vosko, L. Wilk, and M. Nusair.  Spin polarized case.
    !
@@ -668,7 +671,8 @@ END SUBROUTINE vwn_spin
 !
 !
 !----
-SUBROUTINE padefit_ParSet1( x, i, fit, dfit )                           !<GPU:DEVICE>
+SUBROUTINE padefit_ParSet1( x, i, fit, dfit )
+!$acc routine (padefit_ParSet1) seq
    !----
    !! It implements formula [4.4] in:
    !! S.H. Vosko, L. Wilk, and M. Nusair, Can. J. Phys. 58, 1200 (1980)
@@ -718,7 +722,8 @@ SUBROUTINE padefit_ParSet1( x, i, fit, dfit )                           !<GPU:DE
            bx0fx0(i) * ( 2.0_DP/xx0 - txbfx - 4.0_DP*(b(i)+2.0_DP*x0(i))*itxbQ )  )
    !
 END SUBROUTINE
-SUBROUTINE padefit_ParSet2( x, i, fit, dfit )                           !<GPU:DEVICE>
+SUBROUTINE padefit_ParSet2( x, i, fit, dfit )
+!$acc routine (padefit_ParSet2) seq
    !----
    !! It implements formula [4.4] in:
    !! S.H. Vosko, L. Wilk, and M. Nusair, Can. J. Phys. 58, 1200 (1980)
@@ -771,7 +776,8 @@ END SUBROUTINE
 !
 !
 !-----------------------------------------------------------------------------------------
-SUBROUTINE vwn1_rpa_spin( rs, zeta, ec, vc_up, vc_dw )                    !<GPU:DEVICE>
+SUBROUTINE vwn1_rpa_spin( rs, zeta, ec, vc_up, vc_dw )
+!$acc routine (vwn1_rpa_spin) seq
    !---------------------------------------------------------------------------------------
    !
    USE kind_l, ONLY: DP
@@ -846,7 +852,8 @@ END SUBROUTINE
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE pw_spin( rs, zeta, ec, vc_up, vc_dw )                    !<GPU:DEVICE>
+SUBROUTINE pw_spin( rs, zeta, ec, vc_up, vc_dw )
+!$acc routine (pw_spin) seq
   !-----------------------------------------------------------------------
   !! J.P. Perdew and Y. Wang, PRB 45, 13244 (1992).
   !
@@ -955,7 +962,8 @@ END SUBROUTINE pw_spin
 !
 !
 !-----------------------------------------------------------------------------
-SUBROUTINE lsd_lyp( rho, zeta, elyp, vlyp_up, vlyp_dw )                    !<GPU:DEVICE>
+SUBROUTINE lsd_lyp( rho, zeta, elyp, vlyp_up, vlyp_dw )
+!$acc routine (lsd_lyp) seq
   !==--------------------------------------------------------------==
   !==  C. LEE, W. YANG, AND R.G. PARR, PRB 37, 785 (1988)          ==
   !==  THIS IS ONLY THE LDA PART                                   ==

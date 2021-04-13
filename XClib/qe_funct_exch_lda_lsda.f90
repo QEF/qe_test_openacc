@@ -182,7 +182,8 @@ END SUBROUTINE slaterKZK
 !  ... LSDA
 !
 !-----------------------------------------------------------------------
-SUBROUTINE slater_spin( rho, zeta, ex, vx_up, vx_dw )                 !<GPU:DEVICE>
+SUBROUTINE slater_spin( rho, zeta, ex, vx_up, vx_dw )
+!$acc routine (slater_spin) seq
   !-----------------------------------------------------------------------
   !! Slater exchange with alpha=2/3, spin-polarized case.
   !
@@ -223,7 +224,8 @@ END SUBROUTINE slater_spin
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE slater_rxc_spin( rho, z, ex, vx_up, vx_dw )                 !<GPU:DEVICE>
+SUBROUTINE slater_rxc_spin( rho, z, ex, vx_up, vx_dw )
+!$acc routine (slater_rxc_spin) seq
   !-----------------------------------------------------------------------
   !! Slater exchange with alpha=2/3, relativistic exchange case.
   !! Spin-polarized case.
@@ -289,7 +291,8 @@ END SUBROUTINE slater_rxc_spin
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE slater1_spin( rho, zeta, ex, vx_up, vx_dw )                 !<GPU:DEVICE>
+SUBROUTINE slater1_spin( rho, zeta, ex, vx_up, vx_dw )
+!$acc routine (slater1_spin) seq
   !-----------------------------------------------------------------------
   !! Slater exchange with alpha=2/3, spin-polarized case
   !

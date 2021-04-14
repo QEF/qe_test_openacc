@@ -70,6 +70,19 @@ MODULE xc_lib
      END SUBROUTINE
   END INTERFACE
   !
+  ! --*** PROVISIONAL INTERFACE TO TEST OPENACC INCLUSION IN XClib*** --
+  INTERFACE xc_gcx_acc
+     SUBROUTINE xc_gcx_acc_( length, ns, rho, grho, ex, ec, v1x, v2x, v1c, v2c, v2c_ud )
+       USE kind_l,        ONLY: DP  
+       IMPLICIT NONE
+       INTEGER,  INTENT(IN) :: length, ns
+       REAL(DP), INTENT(IN) :: rho(:,:), grho(:,:,:)
+       REAL(DP), INTENT(OUT) :: ex(:), ec(:)
+       REAL(DP), INTENT(OUT) :: v1x(:,:), v2x(:,:)
+       REAL(DP), INTENT(OUT) :: v1c(:,:), v2c(:,:)
+       REAL(DP), OPTIONAL, INTENT(OUT) :: v2c_ud(:)
+     END SUBROUTINE
+  END INTERFACE
   !
 END MODULE xc_lib
 !--------------------------------------------------

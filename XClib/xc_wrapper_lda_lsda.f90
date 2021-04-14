@@ -188,7 +188,6 @@ SUBROUTINE xc( length, sr_d, sv_d, rho_in, ex_out, ec_out, vx_out, vc_out )
      ENDIF
      !
      CALL xc_lda( length, ABS(rho_in(:,1)), ex_out, ec_out, vx_out(:,1), vc_out(:,1) )
-     !CALL xc_lda_acc( length, ABS(rho_in(:,1)), ex_out, ec_out, vx_out(:,1), vc_out(:,1) )
      !
   CASE( 2 )
      !
@@ -197,8 +196,8 @@ SUBROUTINE xc( length, sr_d, sv_d, rho_in, ex_out, ec_out, vx_out, vc_out )
      arho = ABS(rho_in(:,1))
      WHERE (arho > rho_threshold_lda) zeta(:) = rho_in(:,2) / arho(:)
      !
-     CALL xc_lsda( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
-     !CALL xc_lsda_acc( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
+     !CALL xc_lsda( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
+     CALL xc_lsda_acc( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
      !
      DEALLOCATE( arho, zeta )
      ! 
@@ -226,3 +225,78 @@ SUBROUTINE xc( length, sr_d, sv_d, rho_in, ex_out, ec_out, vx_out, vc_out )
   RETURN
   !
 END SUBROUTINE xc
+
+!---------------------------------------------------------------------------
+SUBROUTINE xc_acc( length, sr_d, sv_d, rho_in, ex_out, ec_out, vx_out, vc_out )
+  !-------------------------------------------------------------------------
+  !! Wrapper xc - openacc test version
+  !
+  USE kind_l,            ONLY: DP
+  USE dft_par_mod,       ONLY: iexch, icorr, is_libxc, rho_threshold_lda, &
+                               finite_size_cell_volume_set
+  USE qe_drivers_lda_lsda
+  !
+  IMPLICIT NONE
+  !
+  INTEGER,  INTENT(IN) :: length
+  INTEGER,  INTENT(IN) :: sr_d
+  INTEGER,  INTENT(IN) :: sv_d
+  REAL(DP), INTENT(IN) :: rho_in(length,sr_d)
+  REAL(DP), INTENT(OUT) :: ex_out(length)
+  REAL(DP), INTENT(OUT) :: vx_out(length,sv_d)
+  REAL(DP), INTENT(OUT) :: ec_out(length)
+  REAL(DP), INTENT(OUT) :: vc_out(length,sv_d)
+  !
+  ! ... local variables
+  !
+  REAL(DP), ALLOCATABLE :: arho(:), zeta(:)
+  !
+  INTEGER  :: ir
+  !
+  ex_out = 0.0_DP ; vx_out = 0.0_DP
+  ec_out = 0.0_DP ; vc_out = 0.0_DP
+  !
+  SELECT CASE( sr_d )
+  CASE( 1 )
+     !
+     IF (iexch==8 .OR. icorr==10) THEN
+       IF (.NOT. finite_size_cell_volume_set) CALL xclib_error( 'XC',&
+           'finite size corrected exchange used w/o initialization', 1 )
+     ENDIF
+     !
+     CALL xc_lda_acc( length, ABS(rho_in(:,1)), ex_out, ec_out, vx_out(:,1), vc_out(:,1) )
+     !
+  CASE( 2 )
+     !
+     ALLOCATE( arho(length), zeta(length) )
+     !
+     arho = ABS(rho_in(:,1))
+     WHERE (arho > rho_threshold_lda) zeta(:) = rho_in(:,2) / arho(:)
+     !
+     CALL xc_lsda_acc( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
+     !
+     DEALLOCATE( arho, zeta )
+     ! 
+  CASE( 4 )
+     !
+     ALLOCATE( arho(length), zeta(length) )
+     !
+     arho = ABS( rho_in(:,1) )
+     WHERE (arho > rho_threshold_lda) zeta(:) = SQRT( rho_in(:,2)**2 + rho_in(:,3)**2 + &
+                                          rho_in(:,4)**2 ) / arho(:) ! amag/arho
+     !
+     CALL xc_lsda_acc( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
+     !
+     DEALLOCATE( arho, zeta )
+     !
+  CASE DEFAULT
+     !
+     CALL xclib_error( 'xc_LDA', 'Wrong ns input', 2 )
+     !
+  END SELECT
+  !
+  !
+  RETURN
+  !
+END SUBROUTINE xc_acc
+

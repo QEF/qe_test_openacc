@@ -16,11 +16,12 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
   USE gvect,                ONLY : ngm, g
   USE lsda_mod,             ONLY : nspin
   USE cell_base,            ONLY : omega
-  USE xc_lib,               ONLY : igcc_is_lyp, xclib_dft_is, xc_gcx
+  USE xc_lib,               ONLY : igcc_is_lyp, xclib_dft_is, xc_gcx, xc_gcx_acc
   USE spin_orb,             ONLY : domag
   USE fft_base,             ONLY : dfftp
   USE fft_interfaces,       ONLY : fwfft
   USE fft_rho,              ONLY: rho_r2g
+  USE control_flags,        ONLY : use_gpu
   !
   IMPLICIT NONE
   !
@@ -117,7 +118,9 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
      !
      ! ... This is the spin-unpolarised case
      !
-     CALL xc_gcx( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c )
+     ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
+     IF (.NOT. use_gpu) CALL xc_gcx( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c )
+     IF ( use_gpu ) CALL xc_gcx_acc( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c )
      !
      DO k = 1, dfftp%nnr
         !

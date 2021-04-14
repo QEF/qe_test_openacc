@@ -354,6 +354,7 @@ SUBROUTINE v_xc( rho, rho_core, rhog_core, etxc, vtxc, v )
   USE scf,              ONLY : scf_type
   USE mp_bands,         ONLY : intra_bgrp_comm
   USE mp,               ONLY : mp_sum
+  USE control_flags,    ONLY : use_gpu
   !
   IMPLICIT NONE
   !
@@ -413,7 +414,9 @@ SUBROUTINE v_xc( rho, rho_core, rhog_core, etxc, vtxc, v )
   IF ( nspin == 1 .OR. ( nspin == 4 .AND. .NOT. domag ) ) THEN
      ! ... spin-unpolarized case
      !
-     CALL xc( dfftp%nnr, 1, 1, rho%of_r, ex, ec, vx, vc )
+     ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
+     IF (.NOT. use_gpu) CALL xc( dfftp%nnr, 1, 1, rho%of_r, ex, ec, vx, vc )
+     IF ( use_gpu ) CALL xc_acc( dfftp%nnr, 1, 1, rho%of_r, ex, ec, vx, vc )
      !
      DO ir = 1, dfftp%nnr
         v(ir,1) = e2*( vx(ir,1) + vc(ir,1) )
@@ -427,7 +430,9 @@ SUBROUTINE v_xc( rho, rho_core, rhog_core, etxc, vtxc, v )
   ELSEIF ( nspin == 2 ) THEN
      ! ... spin-polarized case
      !
-     CALL xc( dfftp%nnr, 2, 2, rho%of_r, ex, ec, vx, vc )
+     ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
+     IF (.NOT. use_gpu) CALL xc( dfftp%nnr, 2, 2, rho%of_r, ex, ec, vx, vc )
+     IF ( use_gpu ) CALL xc_acc( dfftp%nnr, 2, 2, rho%of_r, ex, ec, vx, vc )
      !
      DO ir = 1, dfftp%nnr   !OMP ?
         v(ir,:) = e2*( vx(ir,:) + vc(ir,:) )
@@ -449,7 +454,9 @@ SUBROUTINE v_xc( rho, rho_core, rhog_core, etxc, vtxc, v )
   ELSE IF ( nspin == 4 ) THEN
      ! ... noncolinear case
      !
-     CALL xc( dfftp%nnr, 4, 2, rho%of_r, ex, ec, vx, vc )
+     ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
+     IF (.NOT. use_gpu) CALL xc( dfftp%nnr, 4, 2, rho%of_r, ex, ec, vx, vc )
+     IF ( use_gpu ) CALL xc_acc( dfftp%nnr, 4, 2, rho%of_r, ex, ec, vx, vc )
      !
      DO ir = 1, dfftp%nnr  !OMP ?
         arho = ABS( rho%of_r(ir,1) )

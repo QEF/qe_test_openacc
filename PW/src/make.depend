@@ -1131,6 +1131,7 @@ gradcorr.o : ../../Modules/fft_base.o
 gradcorr.o : ../../Modules/fft_rho.o
 gradcorr.o : ../../Modules/kind.o
 gradcorr.o : ../../Modules/recvec.o
+gradcorr.o : ../../Modules/control_flags.o
 gradcorr.o : ../../XClib/xc_lib.o
 gradcorr.o : pwcom.o
 gweights.o : ../../Modules/kind.o

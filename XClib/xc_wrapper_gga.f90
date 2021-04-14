@@ -352,3 +352,120 @@ SUBROUTINE xc_gcx_( length, ns, rho, grho, ex, ec, v1x, v2x, v1c, v2c, v2c_ud )
   RETURN
   !
 END SUBROUTINE xc_gcx_
+!
+!
+!---------------------------------------------------------------------------
+SUBROUTINE xc_gcx_acc_( length, ns, rho, grho, ex, ec, v1x, v2x, v1c, v2c, v2c_ud )
+  !-------------------------------------------------------------------------
+  ! GGA wrapper - acc version
+  !
+  USE kind_l,        ONLY: DP
+  USE dft_par_mod,   ONLY: igcx, igcc, is_libxc, rho_threshold_gga, &
+                           grho_threshold_gga
+  USE qe_drivers_gga
+  !
+  IMPLICIT NONE
+  !
+  INTEGER,  INTENT(IN) :: length
+  INTEGER,  INTENT(IN) :: ns
+  REAL(DP), INTENT(IN) :: rho(:,:)
+  REAL(DP), INTENT(IN) :: grho(:,:,:)
+  REAL(DP), INTENT(OUT) :: ex(:)
+  REAL(DP), INTENT(OUT) :: ec(:)
+  REAL(DP), INTENT(OUT) :: v1x(:,:)
+  REAL(DP), INTENT(OUT) :: v2x(:,:)
+  REAL(DP), INTENT(OUT) :: v1c(:,:)
+  REAL(DP), INTENT(OUT) :: v2c(:,:)
+  REAL(DP), INTENT(OUT), OPTIONAL :: v2c_ud(:)
+  !
+  ! ... local variables
+  !
+  REAL(DP), ALLOCATABLE :: arho(:,:)
+  REAL(DP), ALLOCATABLE :: rh(:), zeta(:)
+  REAL(DP), ALLOCATABLE :: grho2(:,:), grho_ud(:)
+  !
+  INTEGER :: k, is
+  REAL(DP) :: sgn(2)
+  REAL(DP), PARAMETER :: small = 1.E-10_DP
+  !
+  !
+  IF (ns==2 .AND. .NOT. PRESENT(v2c_ud)) CALL xclib_infomsg( 'xc_gcx', 'WARNING: cross &
+                &term v2c_ud not found xc_gcx (gga) call with polarized case' )
+  !
+  ex = 0.0_DP ;  v1x = 0.0_DP ;  v2x = 0.0_DP
+  ec = 0.0_DP ;  v1c = 0.0_DP ;  v2c = 0.0_DP
+  IF ( PRESENT(v2c_ud) ) v2c_ud = 0.0_DP
+  !
+  !
+  ALLOCATE( arho(length,ns), grho2(length,ns) )
+  arho  = 0.0_DP
+  grho2 = 0.0_DP
+  !
+  IF ( ns == 1 ) THEN
+     !
+     ! ... This is the spin-unpolarised case
+     DO k = 1, length
+        IF ( ABS(rho(k,1)) > rho_threshold_gga ) &
+          grho2(k,1) = grho(1,k,1)**2 + grho(2,k,1)**2 + grho(3,k,1)**2
+     ENDDO
+     !
+     !
+     CALL gcxc_acc( length, ABS(rho(:,1)), grho2(:,1), ex, ec, v1x(:,1), v2x(:,1), v1c(:,1), v2c(:,1) )
+     !
+     DO k = 1, length
+        sgn(1) = SIGN(1._DP, rho(k,1))
+        ex(k) = ex(k) * sgn(1)
+        ec(k) = ec(k) * sgn(1)
+     ENDDO
+     !
+  ELSE
+     !
+     DO is = 1, 2
+        grho2(:,is) = grho(1,:,is)**2 + grho(2,:,is)**2 + grho(3,:,is)**2
+     ENDDO
+     !
+     CALL gcx_spin( length, rho, grho2, ex, v1x, v2x )
+     !
+     IF (igcc==3 .OR. igcc==7 .OR. igcc==13 ) THEN
+        !
+        ALLOCATE( grho_ud(length) )
+        !
+        grho_ud = grho(1,:,1) * grho(1,:,2) + grho(2,:,1) * grho(2,:,2) + &
+                  grho(3,:,1) * grho(3,:,2)
+        !
+        arho = rho
+        !
+        CALL gcc_spin_more( length, arho, grho2, grho_ud, ec, v1c, v2c, v2c_ud )
+        !
+        DEALLOCATE( grho_ud )
+        !
+     ELSE
+        !
+        ALLOCATE( rh(length), zeta(length) )
+        !
+        rh = rho(:,1) + rho(:,2)
+        !
+        zeta = 2.0_DP ! trash value, gcc-routines get rid of it when present
+        WHERE ( rh > rho_threshold_gga ) zeta = ( rho(:,1) - rho(:,2) ) / rh(:)
+        !
+        grho2(:,1) = ( grho(1,:,1) + grho(1,:,2) )**2 + &
+                     ( grho(2,:,1) + grho(2,:,2) )**2 + &
+                     ( grho(3,:,1) + grho(3,:,2) )**2
+        !
+        CALL gcc_spin( length, rh, zeta, grho2(:,1), ec, v1c, v2c(:,1) )
+        !
+        v2c(:,2)  = v2c(:,1)
+        IF ( PRESENT(v2c_ud) ) v2c_ud(:) = v2c(:,1)
+        !
+        DEALLOCATE( rh, zeta )
+        !
+     ENDIF
+     !   
+  ENDIF
+  !
+  DEALLOCATE( arho, grho2 )
+  !
+  !
+  RETURN
+  !
+END SUBROUTINE xc_gcx_acc_

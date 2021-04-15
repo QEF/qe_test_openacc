@@ -409,7 +409,6 @@ SUBROUTINE xc_gcx_acc_( length, ns, rho, grho, ex, ec, v1x, v2x, v1c, v2c, v2c_u
           grho2(k,1) = grho(1,k,1)**2 + grho(2,k,1)**2 + grho(3,k,1)**2
      ENDDO
      !
-     !
      CALL gcxc_acc( length, ABS(rho(:,1)), grho2(:,1), ex, ec, v1x(:,1), v2x(:,1), v1c(:,1), v2c(:,1) )
      !
      DO k = 1, length
@@ -424,7 +423,7 @@ SUBROUTINE xc_gcx_acc_( length, ns, rho, grho, ex, ec, v1x, v2x, v1c, v2c, v2c_u
         grho2(:,is) = grho(1,:,is)**2 + grho(2,:,is)**2 + grho(3,:,is)**2
      ENDDO
      !
-     CALL gcx_spin( length, rho, grho2, ex, v1x, v2x )
+     CALL gcx_spin_acc( length, rho, grho2, ex, v1x, v2x )
      !
      IF (igcc==3 .OR. igcc==7 .OR. igcc==13 ) THEN
         !
@@ -435,7 +434,7 @@ SUBROUTINE xc_gcx_acc_( length, ns, rho, grho, ex, ec, v1x, v2x, v1c, v2c, v2c_u
         !
         arho = rho
         !
-        CALL gcc_spin_more( length, arho, grho2, grho_ud, ec, v1c, v2c, v2c_ud )
+        CALL gcc_spin_more_acc( length, arho, grho2, grho_ud, ec, v1c, v2c, v2c_ud )
         !
         DEALLOCATE( grho_ud )
         !
@@ -452,7 +451,7 @@ SUBROUTINE xc_gcx_acc_( length, ns, rho, grho, ex, ec, v1x, v2x, v1c, v2c, v2c_u
                      ( grho(2,:,1) + grho(2,:,2) )**2 + &
                      ( grho(3,:,1) + grho(3,:,2) )**2
         !
-        CALL gcc_spin( length, rh, zeta, grho2(:,1), ec, v1c, v2c(:,1) )
+        CALL gcc_spin_acc( length, rh, zeta, grho2(:,1), ec, v1c, v2c(:,1) )
         !
         v2c(:,2)  = v2c(:,1)
         IF ( PRESENT(v2c_ud) ) v2c_ud(:) = v2c(:,1)

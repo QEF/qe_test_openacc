@@ -119,8 +119,10 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
      ! ... This is the spin-unpolarised case
      !
      ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
+     !call start_clock( 'xc_gcx' )
      IF (.NOT. use_gpu) CALL xc_gcx( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c )
      IF ( use_gpu ) CALL xc_gcx_acc( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c )
+     !call stop_clock( 'xc_gcx' )
      !
      DO k = 1, dfftp%nnr
         !
@@ -144,8 +146,9 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
      ALLOCATE( v2c_ud(dfftp%nnr) )
      !   
      !
-     CALL xc_gcx( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c, v2c_ud )
-     !
+     ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
+     IF (.NOT. use_gpu) CALL xc_gcx( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c, v2c_ud )
+     IF ( use_gpu ) CALL xc_gcx_acc( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c, v2c_ud )
      !
      ! ... h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
      !

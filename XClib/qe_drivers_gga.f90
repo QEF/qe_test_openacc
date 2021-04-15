@@ -25,7 +25,8 @@ MODULE qe_drivers_gga
   !
   PRIVATE
   !
-  PUBLIC :: gcxc, gcx_spin, gcc_spin, gcc_spin_more, gcxc_acc
+  PUBLIC :: gcxc, gcx_spin, gcc_spin, gcc_spin_more, &
+            gcxc_acc, gcx_spin_acc, gcc_spin_acc, gcc_spin_more_acc
   !
   !
 CONTAINS
@@ -1091,11 +1092,11 @@ SUBROUTINE gcx_spin( length, rho_in, grho2_in, sx_tot, v1x_out, v2x_out )
         CALL becke86b( rho(1), grho2(1), sx(1), v1x(1), v2x(1) )
         CALL becke86b( rho(2), grho2(2), sx(2), v1x(2), v2x(2) )
         !
-        sx_tot = 0.5_DP * ( sx(1)*rnull(1) + sx(2)*rnull(2) )
+        sx_tot(ir) = 0.5_DP * ( sx(1)*rnull(1) + sx(2)*rnull(2) )
         v2x = 2.0_DP * v2x
         !
         IF ( exx_started ) THEN
-           sx_tot = (1.0_DP - exx_fraction) * sx_tot
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
            v1x = (1.0_DP - exx_fraction) * v1x
            v2x = (1.0_DP - exx_fraction) * v2x
         ENDIF
@@ -1108,11 +1109,11 @@ SUBROUTINE gcx_spin( length, rho_in, grho2_in, sx_tot, v1x_out, v2x_out )
         CALL becke88( rho(1), grho2(1), sx(1), v1x(1), v2x(1) )
         CALL becke88( rho(2), grho2(2), sx(2), v1x(2), v2x(2) )
         !
-        sx_tot = 0.5_DP * ( sx(1)*rnull(1) + sx(2)*rnull(2) )
+        sx_tot(ir) = 0.5_DP * ( sx(1)*rnull(1) + sx(2)*rnull(2) )
         v2x = 2.0_DP * v2x
         !
         IF ( exx_started ) THEN
-           sx_tot = (1.0_DP - exx_fraction) * sx_tot
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
            v1x = (1.0_DP - exx_fraction) * v1x
            v2x = (1.0_DP - exx_fraction) * v2x
         ENDIF
@@ -1134,7 +1135,7 @@ SUBROUTINE gcx_spin( length, rho_in, grho2_in, sx_tot, v1x_out, v2x_out )
      !
      CASE DEFAULT
         !
-        sx = 0.0_DP
+        sx_tot(ir) = 0.0_DP
         v1x = 0.0_DP
         v2x = 0.0_DP
         !
@@ -1151,6 +1152,451 @@ SUBROUTINE gcx_spin( length, rho_in, grho2_in, sx_tot, v1x_out, v2x_out )
   RETURN
   !
 END SUBROUTINE gcx_spin
+!
+!
+!-------------------------------------------------------------------------
+SUBROUTINE gcx_spin_acc( length, rho_in, grho2_in, sx_tot, v1x_out, v2x_out )
+  !-----------------------------------------------------------------------
+  !! GGA exch pol - openacc test routine
+  !
+  USE exch_gga
+  USE beef_interface, ONLY: beefx
+  !
+  IMPLICIT NONE
+  !
+  INTEGER, INTENT(IN) :: length
+  REAL(DP), INTENT(IN),  DIMENSION(length,2) :: rho_in
+  REAL(DP), INTENT(IN),  DIMENSION(length,2) :: grho2_in
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: sx_tot
+  REAL(DP), INTENT(OUT), DIMENSION(length,2) :: v1x_out
+  REAL(DP), INTENT(OUT), DIMENSION(length,2) :: v2x_out
+  !
+  ! ... local variables
+  !
+  INTEGER :: ir, is, iflag
+  REAL(DP) :: rho_up, rho_dw, grho2_up, grho2_dw
+  REAL(DP) :: v1x_up, v1x_dw, v2x_up, v2x_dw
+  REAL(DP) :: sx_up, sx_dw, rnull_up, rnull_dw
+  REAL(DP) :: sxsr_up, sxsr_dw
+  REAL(DP) :: v1xsr_up, v1xsr_dw, v2xsr_up, v2xsr_dw
+  !
+  REAL(DP) :: v1x_up1, v1x_dw1, v2x_up1, v2x_dw1
+  REAL(DP) :: v1x_up2, v1x_dw2, v2x_up2, v2x_dw2
+  
+  REAL(DP), PARAMETER :: small=1.D-10
+  REAL(DP), PARAMETER :: rho_trash=0.5_DP, grho2_trash=0.2_DP
+  ! temporary values assigned to rho and grho when they
+  ! are too small in order to avoid numerical problems.
+  !
+  sx_tot = 0.0_DP
+  !
+  !
+!$acc data copyin(rho_in, grho2_in), copyout(sx_tot, v1x_out, v2x_out)
+!$acc parallel loop
+  DO ir = 1, length  
+     !
+     rho_up = rho_in(ir,1)
+     rho_dw = rho_in(ir,2)
+     grho2_up = grho2_in(ir,1)
+     grho2_dw = grho2_in(ir,2)
+     rnull_up = 1.0_DP
+     rnull_dw = 1.0_DP
+     !
+     IF ( rho_up+rho_dw <= small ) THEN
+        sx_tot(ir) = 0.0_DP
+        v1x_out(ir,1) = 0.0_DP
+        v2x_out(ir,1) = 0.0_DP
+        v1x_out(ir,2) = 0.0_DP
+        v2x_out(ir,2) = 0.0_DP
+        CYCLE
+     ELSE
+        IF ( rho_up<=small .OR. SQRT(ABS(grho2_up))<=small ) THEN
+          rho_up = rho_trash
+          grho2_up = grho2_trash
+          rnull_up = 0.0_DP
+        ENDIF
+        IF ( rho_dw<=small .OR. SQRT(ABS(grho2_dw))<=small ) THEN
+          rho_dw = rho_trash
+          grho2_dw = grho2_trash
+          rnull_dw = 0.0_DP
+        ENDIF
+     ENDIF
+     !
+     !
+     ! ... exchange
+     !
+     SELECT CASE( igcx )
+     CASE( 0 )
+        !
+        sx_tot(ir) = 0.0_DP
+        v1x_up = 0.0_DP ; v1x_dw = 0.0_DP
+        v2x_up = 0.0_DP ; v2x_dw = 0.0_DP
+        !
+     CASE( 1 )
+        !
+        CALL becke88_spin( rho_up, rho_dw, grho2_up, grho2_dw, sx_up, sx_dw, &
+                           v1x_up, v1x_dw, v2x_up, v2x_dw )
+        !
+        sx_tot(ir) = sx_up*rnull_up + sx_dw*rnull_dw
+        !
+     CASE( 2 )
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL ggax( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL ggax( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+     CASE( 3, 4, 8, 10, 12, 20, 23, 24, 25, 44, 45 )
+        ! igcx=3:  PBE,  igcx=4:  revised PBE, igcx=8:  PBE0, igcx=10: PBEsol
+        ! igcx=12: HSE,  igcx=20: gau-pbe,     igcx=23: obk8, igcx=24: ob86,
+        ! igcx=25: ev93, igcx=44: RPBE,        igcx=45: W31X
+        !
+        iflag = 1
+        IF ( igcx== 4 ) iflag = 2
+        IF ( igcx==10 ) iflag = 3
+        IF ( igcx==23 ) iflag = 5
+        IF ( igcx==24 ) iflag = 6
+        IF ( igcx==25 ) iflag = 7
+        IF ( igcx==44 ) iflag = 8
+        IF ( igcx==45 ) iflag = 9
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL pbex( rho_up, grho2_up, iflag, sx_up, v1x_up, v2x_up )
+        CALL pbex( rho_dw, grho2_dw, iflag, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+        IF ( igcx == 8 .AND. exx_started ) THEN
+           !
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v1x_dw = (1.0_DP - exx_fraction) * v1x_dw
+           v2x_up = (1.0_DP - exx_fraction) * v2x_up
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+           !
+        ELSEIF ( igcx == 12 .AND. exx_started ) THEN
+           !
+           CALL pbexsr( rho_up, grho2_up, sxsr_up, v1xsr_up, &
+                                          v2xsr_up, screening_parameter )
+           CALL pbexsr( rho_dw, grho2_dw, sxsr_dw, v1xsr_dw, &
+                                          v2xsr_dw, screening_parameter )
+           !
+           sx_tot(ir) = sx_tot(ir) - exx_fraction*0.5_DP*( sxsr_up*rnull_up + &
+                                                           sxsr_dw*rnull_dw )
+           v1x_up = v1x_up - exx_fraction * v1xsr_up
+           v1x_dw = v1x_dw - exx_fraction * v1xsr_dw
+           v2x_up = v2x_up - exx_fraction * v2xsr_up * 2.0_DP
+           v2x_dw = v2x_dw - exx_fraction * v2xsr_dw * 2.0_DP
+           !
+        ELSEIF ( igcx == 20 .AND. exx_started ) THEN
+           ! gau-pbe
+           !CALL pbexgau_lsd( rho, grho2, sxsr, v1xsr, v2xsr, gau_parameter )
+           CALL pbexgau( rho_up,grho2_up, sxsr_up, v1xsr_up,v2xsr_up, gau_parameter )
+           CALL pbexgau( rho_dw,grho2_dw, sxsr_dw, v1xsr_dw,v2xsr_dw, gau_parameter )
+           !
+           sx_tot(ir) = sx_tot(ir) - exx_fraction*0.5_DP * ( sxsr_up*rnull_up + &
+                                                             sxsr_dw*rnull_dw )
+           v1x_up = v1x_up - exx_fraction * v1xsr_up
+           v1x_dw = v1x_dw - exx_fraction * v1xsr_dw
+           v2x_up = v2x_up - exx_fraction * v2xsr_up * 2.0_DP
+           v2x_dw = v2x_dw - exx_fraction * v2xsr_dw * 2.0_DP
+           !
+        ENDIF
+        !
+     CASE( 9 )                    ! B3LYP
+        !
+        CALL becke88_spin( rho_up, rho_dw, grho2_up, grho2_dw, sx_up, sx_dw, &
+                           v1x_up, v1x_dw, v2x_up, v2x_dw )
+        !
+        sx_tot(ir) = sx_up*rnull_up + sx_dw*rnull_dw
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = 0.72_DP * sx_tot(ir)
+           v1x_up = 0.72_DP * v1x_up ; v1x_dw = 0.72_DP * v1x_dw
+           v2x_up = 0.72_DP * v2x_up ; v2x_dw = 0.72_DP * v2x_dw
+        ENDIF
+        !
+     CASE( 11 )                   ! 'Wu-Cohen'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL wcx( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL wcx( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+     CASE( 13 )                   ! 'revised PW86 for vdw-df2'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL rPW86( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL rPW86( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+     CASE( 16 )                   ! 'c09x for vdw-df-c09.'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL c09x( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL c09x( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+     CASE( 21 )                   ! 'PW86'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL pw86( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL pw86( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+     CASE( 22 )                   ! 'B86B'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL becke86b( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL becke86b( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+      CASE( 26, 46 )                  ! 'B86R for rev-vdW-DF2'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        IF ( igcx==26 ) iflag = 3 ! B86R for rev-vdW-DF2
+        IF ( igcx==46 ) iflag = 4 ! W32X for vdW-DF3-opt2
+        CALL b86b( rho_up, grho2_up, iflag, sx_up, v1x_up, v2x_up )
+        CALL b86b( rho_dw, grho2_dw, iflag, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+     CASE( 27 )                   ! 'cx13 for vdw-df-cx'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL cx13( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL cx13( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+     CASE( 28 )                   ! X3LYP
+        !
+        CALL becke88_spin( rho_up, rho_dw, grho2_up, grho2_dw, sx_up, sx_dw, &
+                           v1x_up, v1x_dw, v2x_up, v2x_dw )
+        !
+        rho_up = 2.0_DP * rho_up
+        rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up
+        grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL pbex( rho_up, grho2_up, 1, sxsr_up, v1xsr_up, v2xsr_up )
+        CALL pbex( rho_dw, grho2_dw, 1, sxsr_dw, v1xsr_dw, v2xsr_dw )
+        !
+        sx_tot(ir) = 0.5_DP*( sxsr_up*rnull_up + sxsr_dw*rnull_dw )*0.235_DP + &
+                            (   sx_up*rnull_up +   sx_dw*rnull_dw )*0.765_DP
+        v1x_up = v1xsr_up * 0.235_DP + v1x_up * 0.765_DP
+        v1x_dw = v1xsr_dw * 0.235_DP + v1x_dw * 0.765_DP
+        v2x_up = v2xsr_up * 0.235_DP * 2.0_DP + v2x_up * 0.765_DP
+        v2x_dw = v2xsr_dw * 0.235_DP * 2.0_DP + v2x_dw * 0.765_DP
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = 0.709_DP * sx_tot(ir)
+           v1x_up = 0.709_DP * v1x_up
+           v1x_dw = 0.709_DP * v1x_dw
+           v2x_up = 0.709_DP * v2x_up
+           v2x_dw = 0.709_DP * v2x_dw
+        ENDIF
+        !
+     CASE( 29, 31 )               ! 'cx0 for vdw-df-cx0' or `cx0p for vdW-DF-cx0p'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL cx13( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL cx13( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+        ENDIF
+        !
+     CASE( 30 )                   ! 'R860' = 'rPW86-0' for vdw-df2-0'
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL rPW86( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL rPW86( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v1x_dw = (1.0_DP - exx_fraction) * v1x_dw
+           v2x_up = (1.0_DP - exx_fraction) * v2x_up
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+        ENDIF
+        !
+     CASE( 38 )                  ! 'br0 for vdw-df2-BR0' etc
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL b86b( rho_up, grho2_up, 3, sx_up, v1x_up, v2x_up )
+        CALL b86b( rho_dw, grho2_dw, 3, sx_dw, v1x_dw, v2x_dw )     
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v1x_dw = (1.0_DP - exx_fraction) * v1x_dw
+           v2x_up = (1.0_DP - exx_fraction) * v2x_up
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+        ENDIF  
+        !
+     CASE( 40 )                  ! 'c090 for vdw-df-c090' etc
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL c09x( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL c09x( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )  
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v1x_dw = (1.0_DP - exx_fraction) * v1x_dw
+           v2x_up = (1.0_DP - exx_fraction) * v2x_up
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+        ENDIF
+        !
+     CASE( 41 )                 ! B86X for B86BPBEX hybrid
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL becke86b( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL becke86b( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v1x_dw = (1.0_DP - exx_fraction) * v1x_dw
+           v2x_up = (1.0_DP - exx_fraction) * v2x_up
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+        ENDIF
+        !
+     CASE( 42 )                ! B88X for BHANDHLYP
+        !
+        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw
+        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+        !
+        CALL becke88( rho_up, grho2_up, sx_up, v1x_up, v2x_up )
+        CALL becke88( rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw )
+        !
+        sx_tot(ir) = 0.5_DP * ( sx_up*rnull_up + sx_dw*rnull_dw )
+        v2x_up = 2.0_DP * v2x_up
+        v2x_dw = 2.0_DP * v2x_dw
+        !
+        IF ( exx_started ) THEN
+           sx_tot(ir) = (1.0_DP - exx_fraction) * sx_tot(ir)
+           v1x_up = (1.0_DP - exx_fraction) * v1x_up
+           v1x_dw = (1.0_DP - exx_fraction) * v1x_dw
+           v2x_up = (1.0_DP - exx_fraction) * v2x_up
+           v2x_dw = (1.0_DP - exx_fraction) * v2x_dw
+        ENDIF
+        !
+!     CASE( 43 ) ! 'beefx'
+!        !
+!        rho_up = 2.0_DP * rho_up     ; rho_dw = 2.0_DP * rho_dw    !*****TEMPORARY OUT -- openACC TEST
+!        grho2_up = 4.0_DP * grho2_up ; grho2_dw = 4.0_DP * grho2_dw
+!        !
+!        CALL beefx(rho_up, grho2_up, sx_up, v1x_up, v2x_up, 0)
+!        CALL beefx(rho_dw, grho2_dw, sx_dw, v1x_dw, v2x_dw, 0)
+!        !
+!        sx_tot(ir) = 0.5_DP * (sx_up*rnull_up + sx_dw*rnull_dw)
+!        v2x_up = 2.0_DP * v2x_up
+!        v2x_dw = 2.0_DP * v2x_dw
+     !
+     ! case igcx == 5 (HCTH) and 6 (OPTX) not implemented
+     ! case igcx == 7 (meta-GGA) must be treated in a separate call to another
+     ! routine: needs kinetic energy density in addition to rho and grad rho
+     !
+     CASE DEFAULT
+        !
+        sx_tot(ir) = 0.0_DP
+        v1x_up = 0.0_DP ; v1x_dw = 0.0_DP
+        v2x_up = 0.0_DP ; v2x_dw = 0.0_DP
+        !
+     END SELECT     
+ 
+     !
+     v1x_out(ir,1) = v1x_up * rnull_up
+     v1x_out(ir,2) = v1x_dw * rnull_dw
+     v2x_out(ir,1) = v2x_up * rnull_up
+     v2x_out(ir,2) = v2x_dw * rnull_dw
+     !
+  ENDDO
+!$acc end parallel loop
+!$acc end data
+  !
+  !
+  RETURN
+  !
+END SUBROUTINE gcx_spin_acc
 !
 !
 !--------------------------------------------------------------------------------
@@ -1259,6 +1705,107 @@ SUBROUTINE gcc_spin( length, rho_in, zeta_io, grho_in, sc_out, v1c_out, v2c_out 
   RETURN
   !
 END SUBROUTINE gcc_spin
+!
+!
+!--------------------------------------------------------------------------------
+SUBROUTINE gcc_spin_acc( length, rho_in, zeta_io, grho_in, sc_out, v1c_out, v2c_out )
+  !-------------------------------------------------------------------------------
+  !! GGA corr spin - openacc test
+  !
+  USE corr_gga
+  !
+  IMPLICIT NONE
+  !
+  INTEGER, INTENT(IN) :: length
+  !! the length of the I/O arrays
+  REAL(DP), INTENT(IN), DIMENSION(length) :: rho_in
+  !! the total charge
+  REAL(DP), INTENT(INOUT), DIMENSION(length) :: zeta_io
+  !! the magnetization
+  REAL(DP), INTENT(IN), DIMENSION(length) :: grho_in
+  !! the gradient of the charge squared
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: sc_out
+  !! correlation energies
+  REAL(DP), INTENT(OUT), DIMENSION(length,2) :: v1c_out
+  !! correlation potential (density part)
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: v2c_out
+  !! correlation potential (gradient part)
+  !
+  ! ... local variables
+  !
+  INTEGER :: ir
+  REAL(DP) :: rho, zeta, grho
+  REAL(DP) :: sc, v1c_up, v1c_dw, v2c
+  !REAL(DP), PARAMETER :: small=1.E-10_DP !, epsr=1.E-6_DP
+  !
+  !
+!$acc data copyin(rho_in, zeta_io, grho_in), copyout(zeta_io, sc_out, v1c_out, v2c_out)
+!$acc parallel loop  
+  DO ir = 1, length
+    !
+    rho  = rho_in(ir)
+    grho = grho_in(ir)
+    IF ( ABS(zeta_io(ir))<=1.0_DP ) zeta_io(ir) = SIGN( MIN(ABS(zeta_io(ir)), &
+                                    (1.0_DP-rho_threshold_gga)), zeta_io(ir) )
+    zeta = zeta_io(ir)
+    !
+    IF ( ABS(zeta)>1.0_DP .OR. rho<=rho_threshold_gga .OR. &
+         SQRT(ABS(grho))<=rho_threshold_gga ) THEN
+       sc_out(ir) = 0.0_DP
+       v1c_out(ir,1) = 0.0_DP ; v2c_out(ir) = 0.0_DP
+       v1c_out(ir,2) = 0.0_DP
+       CYCLE
+    ENDIF
+    !
+    SELECT CASE( igcc )
+    CASE( 0 )
+       !
+       sc  = 0.0_DP
+       v1c_up = 0.0_DP
+       v1c_dw = 0.0_DP
+       v2c = 0.0_DP
+       !
+    CASE( 1 )
+       !
+       CALL perdew86_spin( rho, zeta, grho, sc, v1c_up, v1c_dw, v2c )
+       !
+    CASE( 2 )
+       !
+       CALL ggac_spin( rho, zeta, grho, sc, v1c_up, v1c_dw, v2c )
+       !
+    CASE( 4 )
+       !
+       CALL pbec_spin( rho, zeta, grho, 1, sc, v1c_up, v1c_dw, v2c )
+       !
+    CASE( 8 )
+       !
+       CALL pbec_spin( rho, zeta, grho, 2, sc, v1c_up, v1c_dw, v2c )
+       !
+!    CASE( 14 )                                           !*****TEMPORARY OUT -- openACC TEST
+!       !
+!       call beeflocalcorrspin(rho, zeta, grho, sc, v1c_up, v1c_dw, v2c, 0)
+       !
+    CASE DEFAULT
+       !
+       sc = 0.0_DP
+       v1c_up = 0.0_DP
+       v1c_dw = 0.0_DP
+       v2c = 0.0_DP
+       !
+    END SELECT
+    !
+    sc_out(ir)  = sc
+    v1c_out(ir,1) = v1c_up
+    v1c_out(ir,2) = v1c_dw
+    v2c_out(ir) = v2c
+    !
+  ENDDO
+!$acc end parallel loop
+!$acc end data
+  !
+  RETURN
+  !
+END SUBROUTINE gcc_spin_acc
 !
 !
 !---------------------------------------------------------------------------
@@ -1374,6 +1921,100 @@ SUBROUTINE gcc_spin_more( length, rho_in, grho_in, grho_ud_in, &
   RETURN
   !
 END SUBROUTINE gcc_spin_more
+!
+!
+!---------------------------------------------------------------------------
+SUBROUTINE gcc_spin_more_acc( length, rho_in, grho_in, grho_ud_in, &
+                                            sc, v1c, v2c, v2c_ud )
+  !-------------------------------------------------------------------------
+  !! GGA spin corr more - openacc test
+  !
+  USE corr_gga
+  !
+  IMPLICIT NONE
+  !
+  INTEGER, INTENT(IN) :: length
+  REAL(DP), INTENT(IN), DIMENSION(length,2) :: rho_in
+  REAL(DP), INTENT(IN), DIMENSION(length,2) :: grho_in
+  REAL(DP), INTENT(IN), DIMENSION(length) :: grho_ud_in
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: sc
+  REAL(DP), INTENT(OUT), DIMENSION(length,2) :: v1c
+  REAL(DP), INTENT(OUT), DIMENSION(length,2) :: v2c
+  REAL(DP), INTENT(OUT), DIMENSION(length) :: v2c_ud
+  !
+  ! ... local variables
+  !
+  INTEGER :: ir
+  REAL(DP) :: rho_up, rho_dw, grho_up, grho_dw
+  REAL(DP) :: grho_ud
+  !
+  sc  = 0.0_DP
+  v1c = 0.0_DP
+  v2c = 0.0_DP
+  v2c_ud = 0.0_DP
+  !
+!$acc data copyin(rho_in, grho_in, grho_ud_in), copyout(sc, v1c, v2c, v2c_ud)
+!$acc parallel loop
+  DO ir = 1, length
+    !
+    rho_up = rho_in(ir,1)
+    rho_dw = rho_in(ir,2)
+    grho_up = grho_in(ir,1)
+    grho_dw = grho_in(ir,2)
+    grho_ud = grho_ud_in(ir)
+    !
+    IF ( rho_up+rho_dw < rho_threshold_gga ) THEN
+       sc(ir) = 0.0_DP
+       v1c(ir,1) = 0.0_DP ; v1c(ir,2) = 0.0_DP
+       v2c(ir,1) = 0.0_DP ; v2c_ud(ir) = 0.0_DP
+       v2c(ir,2) = 0.0_DP
+       CYCLE
+    ENDIF
+    !
+    CALL lsd_glyp( rho_up, rho_dw, grho_up, grho_dw, grho_ud, &
+                   sc(ir), v1c(ir,1), v1c(ir,2), v2c(ir,1),   &
+                   v2c(ir,2), v2c_ud(ir) )
+    !
+    SELECT CASE( igcc )
+    CASE( 3 )
+       !
+       ! ... void
+       !
+    CASE( 7 )
+       !
+       IF ( exx_started ) THEN
+          sc(ir) = 0.81_DP * sc(ir)
+          v1c(ir,1) = 0.81_DP * v1c(ir,1)
+          v1c(ir,2) = 0.81_DP * v1c(ir,2)
+          v2c(ir,1) = 0.81_DP * v2c(ir,1)
+          v2c(ir,2) = 0.81_DP * v2c(ir,2)
+          v2c_ud(ir) = 0.81_DP * v2c_ud(ir)
+       ENDIF
+       !
+    CASE( 13 )
+       !
+       IF ( exx_started ) THEN
+          sc(ir) = 0.871_DP * sc(ir)
+          v1c(ir,1) = 0.871_DP * v1c(ir,1)
+          v1c(ir,2) = 0.871_DP * v1c(ir,2)
+          v2c(ir,1) = 0.871_DP * v2c(ir,1)
+          v2c(ir,2) = 0.871_DP * v2c(ir,2)
+          v2c_ud(ir) = 0.871_DP * v2c_ud(ir)
+       ENDIF
+       !
+    CASE DEFAULT
+       !
+       !CALL xclib_error(" gcc_spin_more "," gradient correction not implemented ",1)  !***acc test
+       !
+    END SELECT
+    !
+  ENDDO
+!$acc end parallel loop
+!$acc end data
+  !
+  RETURN
+  !
+END SUBROUTINE gcc_spin_more_acc
 !
 !
 END MODULE qe_drivers_gga

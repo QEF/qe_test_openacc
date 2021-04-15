@@ -248,7 +248,8 @@ END SUBROUTINE pbec
 ! ===========> SPIN <===========
 !
 !-----------------------------------------------------------------------
-SUBROUTINE perdew86_spin( rho, zeta, grho, sc, v1c_up, v1c_dw, v2c )                    !<GPU:DEVICE>
+SUBROUTINE perdew86_spin( rho, zeta, grho, sc, v1c_up, v1c_dw, v2c )
+!$acc routine (perdew86_spin) seq
   !---------------------------------------------------------------------
   !! Perdew gradient correction on correlation: PRB 33, 8822 (1986)
   !! spin-polarized case.
@@ -320,7 +321,8 @@ END SUBROUTINE perdew86_spin
 !
 !
 !-----------------------------------------------------------------------
-SUBROUTINE ggac_spin( rho, zeta, grho, sc, v1c_up, v1c_dw, v2c )                    !<GPU:DEVICE>
+SUBROUTINE ggac_spin( rho, zeta, grho, sc, v1c_up, v1c_dw, v2c )
+!$acc routine (ggac_spin) seq
   !---------------------------------------------------------------------
   !! Perdew-Wang GGA (PW91) correlation part - spin-polarized
   !
@@ -361,7 +363,7 @@ SUBROUTINE ggac_spin( rho, zeta, grho, sc, v1c_up, v1c_dw, v2c )                
   !
   rs = pi34 / rho**third
   !
-  CALL pw_spin( rs, zeta, ec, vc_up, vc_dn )                                 !<GPU:pw_spin=>pw_spin_d>
+  CALL pw_spin( rs, zeta, ec, vc_up, vc_dn )
   !
   rs2 = rs * rs
   rs3 = rs * rs2
@@ -425,7 +427,8 @@ END SUBROUTINE ggac_spin
 !
 !
 !-------------------------------------------------------------------
-SUBROUTINE pbec_spin( rho, zeta, grho, iflag, sc, v1c_up, v1c_dw, v2c )                    !<GPU:DEVICE>
+SUBROUTINE pbec_spin( rho, zeta, grho, iflag, sc, v1c_up, v1c_dw, v2c )
+!$acc routine (pbec_spin) seq
   !-----------------------------------------------------------------
   !! PBE correlation (without LDA part) - spin-polarized.
   !
@@ -436,7 +439,7 @@ SUBROUTINE pbec_spin( rho, zeta, grho, iflag, sc, v1c_up, v1c_dw, v2c )         
   !
   IMPLICIT NONE
   !
-  INTEGER, INTENT(IN) :: iflag        !<GPU:VALUE>
+  INTEGER, INTENT(IN) :: iflag
   !! see main comments
   REAL(DP), INTENT(IN) :: rho
   !! the total charge density
@@ -469,7 +472,7 @@ SUBROUTINE pbec_spin( rho, zeta, grho, iflag, sc, v1c_up, v1c_dw, v2c )         
   !
   rs = pi34 / rho**third
   !
-  CALL pw_spin( rs, zeta, ec, vc_up, vc_dn )                                 !<GPU:pw_spin=>pw_spin_d>
+  CALL pw_spin( rs, zeta, ec, vc_up, vc_dn )
   !
   kf = xkf / rs
   ks = xks * SQRT(kf)
@@ -522,7 +525,8 @@ END SUBROUTINE pbec_spin
 !
 !
 !------------------------------------------------------------------------
-SUBROUTINE lsd_glyp( rho_in_up, rho_in_dw, grho_up, grho_dw, grho_ud, sc, v1c_up, v1c_dw, v2c_up, v2c_dw, v2c_ud )                     !<GPU:DEVICE>
+SUBROUTINE lsd_glyp( rho_in_up, rho_in_dw, grho_up, grho_dw, grho_ud, sc, v1c_up, v1c_dw, v2c_up, v2c_dw, v2c_ud )
+!$acc routine (lsd_glyp) seq
   !----------------------------------------------------------------------
   !! Lee, Yang, Parr: gradient correction part.
   !

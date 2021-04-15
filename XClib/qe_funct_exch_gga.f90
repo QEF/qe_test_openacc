@@ -1219,7 +1219,8 @@ END SUBROUTINE cx13
 ! ===========> SPIN <===========
 !
 !-----------------------------------------------------------------------
-SUBROUTINE becke88_spin( rho_up, rho_dw, grho_up, grho_dw, sx_up, sx_dw, v1x_up, v1x_dw, v2x_up, v2x_dw )                     !<GPU:DEVICE>
+SUBROUTINE becke88_spin( rho_up, rho_dw, grho_up, grho_dw, sx_up, sx_dw, v1x_up, v1x_dw, v2x_up, v2x_dw )
+!$acc routine (becke88_spin) seq
   !-----------------------------------------------------------------------
   !! Becke exchange: A.D. Becke, PRA 38, 3098 (1988) - Spin polarized case
   !
@@ -1892,7 +1893,7 @@ FUNCTION EXPINT(n, x)
       IMPLICIT NONE
       INTEGER, INTENT(IN) :: n
       REAL(DP), INTENT(IN) :: x
-      REAL(DP) :: expint                             !<GPU:expint=>expint_d>
+      REAL(DP) :: expint 
       INTEGER, parameter :: maxit=200
       REAL(DP), parameter :: eps=1E-12, big=huge(x)*eps
       REAL(DP), parameter :: euler = 0.577215664901532860606512d0
@@ -1907,12 +1908,12 @@ FUNCTION EXPINT(n, x)
       END IF
 
       IF (n == 0) THEN
-         expint = exp(-x)/x                                             !<GPU:expint=>expint_d>
+         expint = exp(-x)/x
          RETURN
       END IF
       nm1 = n-1
       IF (x == 0.0d0) THEN
-         expint = 1.0d0/nm1                                             !<GPU:expint=>expint_d>
+         expint = 1.0d0/nm1
       ELSE IF (x > 1.0d0) THEN
          b = x+n
          c = big
@@ -1928,12 +1929,12 @@ FUNCTION EXPINT(n, x)
             IF (ABS(del-1.0d0) <= EPS) EXIT
          END DO
          IF (i > maxit) STOP !CALL xclib_error('expint','continued fraction failed',1)
-         expint = h*EXP(-x)                                             !<GPU:expint=>expint_d>
+         expint = h*EXP(-x)
       ELSE
          IF (nm1 /= 0) THEN
-            expint = 1.0d0/nm1                                          !<GPU:expint=>expint_d>
+            expint = 1.0d0/nm1
          ELSE
-            expint = -LOG(x)-euler                                      !<GPU:expint=>expint_d>
+            expint = -LOG(x)-euler
          END IF
          fact = 1.0d0
          do i=1,maxit
@@ -1950,8 +1951,8 @@ FUNCTION EXPINT(n, x)
                del = fact*(-LOG(x)-euler+iarsum)
 !               del = fact*(-LOG(x)-euler+sum(1.0d0/arth(1,1,nm1)))
             END IF
-            expint = expint + del                                       !<GPU:expint=>expint_d>
-            IF (ABS(del) < ABS(expint)*eps) EXIT                        !<GPU:expint=>expint_d>
+            expint = expint + del
+            IF (ABS(del) < ABS(expint)*eps) EXIT
          END DO
          IF (i > maxit) STOP !CALL xclib_error('expint','series failed',1)
       END IF

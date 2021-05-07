@@ -16,7 +16,11 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
   USE gvect,                ONLY : ngm, g
   USE lsda_mod,             ONLY : nspin
   USE cell_base,            ONLY : omega
-  USE xc_lib,               ONLY : igcc_is_lyp, xclib_dft_is, xc_gcx, xc_gcx_acc
+  USE xc_lib,               ONLY : igcc_is_lyp, xclib_dft_is, xc_gcx
+!civn
+#if defined(__CUDA) 
+  USE xc_lib,               ONLY : xc_gcx_acc
+#endif 
   USE spin_orb,             ONLY : domag
   USE fft_base,             ONLY : dfftp
   USE fft_interfaces,       ONLY : fwfft
@@ -121,7 +125,10 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
      ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
      !call start_clock( 'xc_gcx' )
      IF (.NOT. use_gpu) CALL xc_gcx( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c )
+!civn 
+#if defined(__CUDA)
      IF ( use_gpu ) CALL xc_gcx_acc( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c )
+#endif
      !call stop_clock( 'xc_gcx' )
      !
      DO k = 1, dfftp%nnr
@@ -148,7 +155,10 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
      !
      ! --*** PROVISIONAL SET-UP TO TEST OPENACC INCLUSION IN XClib*** --
      IF (.NOT. use_gpu) CALL xc_gcx( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c, v2c_ud )
+!civn 
+#if defined(__CUDA)
      IF ( use_gpu ) CALL xc_gcx_acc( dfftp%nnr, nspin0, rhoaux, grho, sx, sc, v1x, v2x, v1c, v2c, v2c_ud )
+#endif 
      !
      ! ... h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
      !

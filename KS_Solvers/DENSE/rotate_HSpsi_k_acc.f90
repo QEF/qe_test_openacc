@@ -60,37 +60,37 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
     call start_clock('rotHSw:move'); !write(*,*) 'start rotHSw:move' ; FLUSH(6)
     ALLOCATE ( aux_d ( npwx, nstart ) )
 !$acc data create( aux_d( npwx, nstart ) ) 
-!$acc parallel loop 
+!$acc parallel loop collapse(2)
     DO ii = 1, npw
       DO jj = 1, nstart 
         aux_d(ii,jj) = psi_d (npwx+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nstart 
         psi_d (npw+ii,jj) = aux_d(ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nstart 
         aux_d(ii,jj) = hpsi_d(npwx+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nstart 
         hpsi_d(npw+ii,jj) = aux_d(ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nstart 
         aux_d(ii,jj) = spsi_d(npwx+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop 
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nstart 
         spsi_d(npw+ii,jj) = aux_d(ii,jj)
@@ -231,55 +231,55 @@ SUBROUTINE rotate_HSpsi_k_acc( npwx, npw, nstart, nbnd, npol, psi_d, hpsi_d, ove
     call start_clock('rotHSw:move'); !write(*,*) 'start rotHSw:move' ; FLUSH(6)
     ALLOCATE ( aux_d ( npwx, nbnd ) )
 !$acc data create( aux_d ( npwx, nbnd ) ) 
-!$acc parallel loop
+!$acc parallel loop  collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nbnd 
         aux_d(ii,jj) = psi_d (npw+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nbnd 
         psi_d(npwx+ii,jj) = aux_d(ii,jj)
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nbnd 
         aux_d(ii,jj) = hpsi_d(npw+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nbnd 
         hpsi_d(npwx+ii,jj) = aux_d(ii,jj)
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop  collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nbnd 
         aux_d(ii,jj) = spsi_d(npw+ii,jj)
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop collapse(2) 
     DO ii = 1, npw
       DO jj = 1, nbnd 
         spsi_d(npwx+ii,jj) = aux_d(ii,jj)
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop  collapse(2) 
     DO ii = npw+1, npwx
       DO jj = 1, nbnd 
         psi_d(ii,jj) = ZERO
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop  collapse(2) 
     DO ii = npw+1, npwx
       DO jj = 1, nbnd 
         hpsi_d(ii,jj) = ZERO 
       END DO 
     END DO 
-!$acc parallel loop
+!$acc parallel loop  collapse(2) 
     DO ii = npw+1, npwx
       DO jj = 1, nbnd 
         spsi_d(ii,jj) = ZERO

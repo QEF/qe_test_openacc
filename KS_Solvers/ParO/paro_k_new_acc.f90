@@ -39,31 +39,6 @@
 ! The file is written mainly by Stefano de Gironcoli and Yan Pan.
 !
 !-------------------------------------------------------------------------------
-SUBROUTINE wrap_paro_k_gpu( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
-                   npwx, npw, nbnd, npol, evc, eig, btype, ethr, notconv, nhpsi )
-  USE util_param,          ONLY : DP, stdout
-implicit none
-  LOGICAL, INTENT(IN)        :: overlap
-  INTEGER, INTENT(IN)        :: npw, npwx, nbnd, npol
-  COMPLEX(DP), INTENT(INOUT) :: evc(npwx*npol,nbnd)
-  REAL(DP), INTENT(IN)       :: ethr
-  REAL(DP), INTENT(INOUT)    :: eig(nbnd)   
-  INTEGER, INTENT(IN)        :: btype(nbnd)
-  INTEGER, INTENT(OUT)       :: notconv, nhpsi
-  EXTERNAL h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu
-
-  write(stdout, *) 'wrapping ParO_k...'
-
-!$acc data copy(evc(:,:), eig(:)) 
-!$acc host_data use_device(evc, eig)
-  Call paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
-                     npwx, npw, nbnd, npol, evc, eig, btype, ethr, notconv, nhpsi )
-!$acc end host_data
-!$acc end data
-
-RETURN
-
-END SUBROUTINE
 !
 SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
                    npwx, npw, nbnd, npol, evc_d, eig_d, btype, ethr, notconv, nhpsi )
@@ -151,7 +126,7 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
   do ii = 1, nbnd
     conv_d(ii) = .FALSE.
   end do  
-!$acc parallel loop 
+!$acc parallel loop collapse(2)
   DO ii = 1, npwx*npol
     DO jj = 1, nbnd
       psi_d(ii,jj) = evc_d(ii,jj)
@@ -250,6 +225,7 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 !$acc parallel loop 
      DO jj = 1, how_many  
        kk = jj + ibnd_start - 1
+!$acc loop
        DO ii = 1, npwx*npol
          psi_d (ii,nbase+jj) = psi_d (ii,nbase+kk)
          hpsi_d(ii,nbase+jj) = hpsi_d(ii,nbase+kk)
@@ -332,7 +308,7 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   END DO ParO_loop
 
-!$acc parallel loop 
+!$acc parallel loop collapse(2)
   DO ii = 1, npwx*npol
     DO jj = 1, nbnd  
       evc_d(ii,jj) = psi_d(ii,jj)

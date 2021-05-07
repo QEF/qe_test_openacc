@@ -733,9 +733,18 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
                 !
              ELSE
                 !
-                CALL cegterg_gpu ( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
-                               npw, npwx, nbnd, nbndx, npol, evc_d, ethr, &
-                               et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
+!civn 
+!                CALL cegterg_gpu ( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
+!                               npw, npwx, nbnd, nbndx, npol, evc_d, ethr, &
+!                               et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
+                CALL using_evc(1) ; CALL using_et(1)
+!$acc data copy(evc(:,:), et(:,:))
+!$acc host_data use_device(evc, et)
+                CALL cegterg_acc ( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
+                               npw, npwx, nbnd, nbndx, npol, evc, ethr, &
+                               et(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
+!$acc end host_data
+!$acc end data
              END IF
           END IF
           !

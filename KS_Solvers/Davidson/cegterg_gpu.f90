@@ -11,7 +11,7 @@
 !----------------------------------------------------------------------------
 SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
                     npw, npwx, nvec, nvecx, npol, evc, ethr, &
-                    e_d, btype, notcnv, lrot, dav_iter, nhpsi )
+                    e, btype, notcnv, lrot, dav_iter, nhpsi )
   !----------------------------------------------------------------------------
   !
   ! ... iterative solution of the eigenvalue problem:
@@ -22,7 +22,6 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   ! ... S is an overlap matrix, evc is a complex vector
   !
 #if defined(__CUDA)
-!  use cudafor
   use cublas
 #endif
   USE util_param,    ONLY : DP
@@ -56,16 +55,11 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
     ! band type ( 1 = occupied, 0 = empty )
   LOGICAL, INTENT(IN) :: lrot
     ! .TRUE. if the wfc have already been rotated
-  REAL(DP), INTENT(OUT) :: e_d(nvec)
+  REAL(DP), INTENT(OUT) :: e(nvec)
     ! contains the estimated roots.
   INTEGER, INTENT(OUT) :: dav_iter, notcnv
     ! integer number of iterations performed
     ! number of unconverged roots
-!civn 
-#if defined(__CUDA)
-  attributes(DEVICE) :: e_d
-! attributes(DEVICE) :: evc_d, e_d
-#endif
   INTEGER, INTENT(OUT) :: nhpsi
     ! total number of indivitual hpsi
   !
@@ -107,10 +101,6 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
     ! auxiliary variables for performing dot product
   INTEGER :: i,j,k, ipol
     !
-!civn
-!#if defined(__CUDA)
-!  attributes(DEVICE) :: hc_d, sc_d, vc_d, ew_d, psi_d, hpsi_d, spsi_d
-!#endif
   !
   REAL(DP), EXTERNAL :: KSddot
   !
@@ -148,7 +138,7 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
   END IF
 !civn 
-!$acc data deviceptr( evc(npwx*npol,nvec) )   
+!$acc data deviceptr( evc(npwx*npol,nvec), e(nvec) )   
 ! 
   !
   ALLOCATE(  psi( npwx*npol, nvecx ), STAT=ierr )
@@ -294,13 +284,13 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
 !$acc parallel loop
      DO n = 1, nbase
         !
-        e_d(n) = REAL( hc(n,n) )
+        e(n) = REAL( hc(n,n) )
         !
         vc(n,n) = ONE
         !
      END DO
      !
-     CALL mp_bcast( e_d, root_bgrp_id, inter_bgrp_comm )
+     CALL mp_bcast( e, root_bgrp_id, inter_bgrp_comm )
      !
   ELSE
      !
@@ -316,7 +306,7 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      ENDIF
      CALL stop_clock( 'cegterg:diag' )
      !
-     CALL dev_memcpy (e_d, ew, (/ 1, nvec /), 1 )
+     CALL dev_memcpy (e, ew, (/ 1, nvec /), 1 )
      !
   END IF
   !
@@ -347,14 +337,14 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !      !
      !      ! ... for use in g_psi
      !      !
-     !      ew(nbase+np) = e_d(n)
+     !      ew(nbase+np) = e(n)
      !      !
      !   END IF
      !   !
      !END DO
      ! ========= TO HERE, REPLACED BY =======
 
-     CALL reorder_evals_cevecs(nbase, nvec, nvecx, conv, e_d, ew, vc)
+     CALL reorder_evals_cevecs(nbase, nvec, nvecx, conv, e, ew, vc)
      !
      nb1 = nbase + 1
      !
@@ -547,7 +537,7 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
 !$acc parallel loop
      DO i = 1, nvec
        ew_host(i) = ew(i)
-       e_host(i) = e_d(i)
+       e_host(i) = e(i)
      END DO 
 !$acc end data
      WHERE( btype(1:nvec) == 1 )
@@ -564,7 +554,7 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
      notcnv = COUNT( .NOT. conv(:) )
      !
-     CALL dev_memcpy (e_d, ew, (/ 1, nvec /) )
+     CALL dev_memcpy (e, ew, (/ 1, nvec /) )
      !
      ! ... if overall convergence has been achieved, or the dimension of
      ! ... the reduced basis set is becoming too large, or in any case if
@@ -641,7 +631,7 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
            DO j = 1, nbase
               !
               IF ( j == n ) THEN
-                 hc(j,n) = CMPLX( e_d(n), 0.0_DP ,kind=DP)
+                 hc(j,n) = CMPLX( e(n), 0.0_DP ,kind=DP)
                  !
                  sc(j,n) = ONE
                  vc(j,n) = ONE

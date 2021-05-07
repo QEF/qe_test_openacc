@@ -61,8 +61,10 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   INTEGER, INTENT(OUT) :: dav_iter, notcnv
     ! integer number of iterations performed
     ! number of unconverged roots
+!civn 
 #if defined(__CUDA)
-  attributes(DEVICE) :: evc_d, e_d
+  attributes(DEVICE) :: e_d
+! attributes(DEVICE) :: evc_d, e_d
 #endif
   INTEGER, INTENT(OUT) :: nhpsi
     ! total number of indivitual hpsi
@@ -144,6 +146,9 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      kdmx = npwx*npol
      !
   END IF
+!civn 
+!$acc data deviceptr( evc_d(npwx*npol,nvec) )
+! 
   !
   ALLOCATE(  psi_d( npwx*npol, nvecx ), STAT=ierr )
   IF( ierr /= 0 ) &
@@ -641,6 +646,8 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
   DEALLOCATE( hpsi_d )
   DEALLOCATE( psi_d )
+!civn 
+!$acc end data
   !
   CALL stop_clock( 'cegterg' ); !write(*,*) 'stop cegterg' ; FLUSH(6)
   !call print_clock( 'cegterg' )

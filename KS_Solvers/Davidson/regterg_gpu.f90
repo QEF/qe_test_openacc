@@ -25,7 +25,6 @@ SUBROUTINE regterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   ! ... (real wavefunctions with only half plane waves stored)
   !
 #if defined(__CUDA)
-  use cudafor
   use cublas
 #endif
   USE util_param,    ONLY : DP, stdout
@@ -184,13 +183,14 @@ SUBROUTINE regterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
     END DO 
   END IF 
   !
-!$acc parallel loop
+!$acc kernels 
   DO k=1,nvec
      DO i=1,npwx
          psi(i,k) = evc(i,k)
          IF ( (gstart == 2) .and. (i == 1) ) psi(1,k) = CMPLX( DBLE( psi(1,k) ), 0.D0 ,kind=DP)
      END DO
   END DO
+!$acc end kernels
   !
   ! ... hpsi contains h times the basis vectors
   !

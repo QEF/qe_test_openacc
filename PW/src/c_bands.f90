@@ -480,17 +480,27 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
              END IF
              ! CALL using_evc(1) done above
           ELSE
-             CALL using_evc_d(1); CALL using_et_d(1);
+!civn 
+!             CALL using_evc_d(1); CALL using_et_d(1);
              IF ( use_para_diag ) THEN
+                CALL using_evc_d(1); CALL using_et_d(1);
                 CALL pregterg_gpu( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
                             npw, npwx, nbnd, nbndx, evc_d, ethr, &
                             et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi ) !    BEWARE gstart has been removed from call 
                 !
              ELSE
                 !
-                CALL regterg_gpu (  h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
-                         npw, npwx, nbnd, nbndx, evc_d, ethr, &
-                         et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi ) !    BEWARE gstart has been removed from call
+!                CALL regterg_gpu (  h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
+!                         npw, npwx, nbnd, nbndx, evc_d, ethr, &
+!                         et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi ) !    BEWARE gstart has been removed from call
+                CALL using_evc(1) ; CALL using_et(1)  
+!$acc data copy(evc(:,:), et(:,:))
+!$acc host_data use_device(evc, et)
+                CALL regterg_acc (  h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
+                         npw, npwx, nbnd, nbndx, evc, ethr, &
+                         et(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi ) !    BEWARE gstart has been removed from call
+!$acc end host_data
+!$acc end data
              END IF
              ! CALL using_evc_d(1) ! done above
           END IF

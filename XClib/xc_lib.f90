@@ -19,11 +19,11 @@ MODULE xc_lib
   PRIVATE
   !
   !
-  !PUBLIC :: xc, dmxc         !LDA
+  !PUBLIC :: xc, dmxc                     !LDA
   !
-  PUBLIC :: xc_gcx !, dgcxc   !GGA
+  PUBLIC :: xc_gcx, xc_gcx_acc !, dgcxc   !GGA
   !
-  !PUBLIC :: xc_metagcx       !MGGA
+  !PUBLIC :: xc_metagcx                   !MGGA
   !
   PUBLIC :: xclib_set_dft_from_name,           &
             xclib_set_dft_IDs,                 &

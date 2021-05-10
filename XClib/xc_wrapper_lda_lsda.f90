@@ -196,8 +196,7 @@ SUBROUTINE xc( length, sr_d, sv_d, rho_in, ex_out, ec_out, vx_out, vc_out )
      arho = ABS(rho_in(:,1))
      WHERE (arho > rho_threshold_lda) zeta(:) = rho_in(:,2) / arho(:)
      !
-     !CALL xc_lsda( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
-     CALL xc_lsda_acc( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
+     CALL xc_lsda( length, arho, zeta, ex_out, ec_out, vx_out, vc_out )
      !
      DEALLOCATE( arho, zeta )
      ! 

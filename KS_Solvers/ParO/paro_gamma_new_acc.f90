@@ -38,10 +38,11 @@
 !
 ! The file is written mainly by Stefano de Gironcoli and Yan Pan.
 !
-!-------------------------------------------------------------------------------
+! GPU version by Ivan Carnimeo
 !
-SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
-                   npwx, npw, nbnd, npol, evc_d, eig_d, btype, ethr, notconv, nhpsi )
+!-------------------------------------------------------------------------------
+SUBROUTINE paro_gamma_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap, &
+                 npwx, npw, nbnd, evc_d, eig_d, btype, ethr, notconv, nhpsi )
   !-------------------------------------------------------------------------------
   !paro_flag = 1: modified parallel orbital-updating method
   !
@@ -57,11 +58,10 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   ! I/O variables
   LOGICAL, INTENT(IN)        :: overlap
-  INTEGER, INTENT(IN)        :: npw, npwx, nbnd, npol
-  COMPLEX(DP), INTENT(INOUT) :: evc_d(npwx*npol,nbnd)
+  INTEGER, INTENT(IN)        :: npw, npwx, nbnd
+  COMPLEX(DP), INTENT(INOUT) :: evc_d(npwx,nbnd)
   REAL(DP), INTENT(IN)       :: ethr
-  REAL(DP), INTENT(INOUT)    :: eig_d(nbnd)   
-  REAL(DP), ALLOCATABLE      :: eig(:)       ! copy for protate
+  REAL(DP), INTENT(INOUT)    :: eig_d(nbnd)
   INTEGER, INTENT(IN)        :: btype(nbnd)
   INTEGER, INTENT(OUT)       :: notconv, nhpsi
 !  INTEGER, INTENT(IN)        :: paro_flag
@@ -87,19 +87,20 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
   INTEGER :: ibnd, ibnd_start, ibnd_end, how_many, lbnd, kbnd, last_unconverged, &
              recv_counts(nbgrp), displs(nbgrp), column_type
 
-  INTEGER :: ii, jj, kk   ! indexes for cuf kernel loops
-!
+  INTEGER :: ii, jj, kk ! indexes for cuf kernel loops
+
 !civn 2fix: these are needed only for __MPI = true (protate)
-  REAL(DP), ALLOCATABLE    :: ew(:)
-  COMPLEX(DP), ALLOCATABLE :: psi(:,:), hpsi(:,:), spsi(:,:)
+  COMPLEX(DP), ALLOCATABLE :: psi(:,:), hpsi(:,:), spsi(:,:) 
+  REAL(DP), ALLOCATABLE    :: eig(:), ew(:)
+!
   !
-  ! .. device variables
+  ! ... device variables
   !
-  REAL(DP), ALLOCATABLE    :: ew_d(:)
   COMPLEX(DP), ALLOCATABLE :: psi_d(:,:), hpsi_d(:,:), spsi_d(:,:)
+  REAL(DP), ALLOCATABLE    :: ew_d(:)
   LOGICAL, ALLOCATABLE     :: conv_d(:)
 !civn 
-  write(*,*) 'using paro_k_new_acc'
+  write(*,*) 'using paro_gamma_new_acc'
 !
   !
   ! ... init local variables
@@ -109,16 +110,18 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   nvecx = nbnd + max ( nint ( extra_factor * nbnd ), min_extra )
   !
-  CALL start_clock( 'paro_k' ); !write (6,*) ' enter paro diag'
+  CALL start_clock( 'paro_gamma' ); !write (6,*) ' enter paro diag'
 
-!$acc data deviceptr( evc_d(npwx*npol,nbnd), eig_d(nbnd) )
-  CALL mp_type_create_column_section(evc_d(1,1), 0, npwx*npol, npwx*npol, column_type)
+  CALL mp_type_create_column_section(evc_d(1,1), 0, npwx, npwx, column_type)
 
-  ALLOCATE ( ew_d(nvecx), conv(nbnd) )
+!$acc data deviceptr( evc_d(npwx,nbnd), eig_d(nbnd) ) 
+
+  ALLOCATE ( conv(nbnd) )
   ALLOCATE ( conv_d(nbnd) )
-  ALLOCATE ( psi_d(npwx*npol,nvecx), hpsi_d(npwx*npol,nvecx), spsi_d(npwx*npol,nvecx) )
-!$acc data create(  psi_d(npwx*npol,nvecx), hpsi_d(npwx*npol,nvecx), spsi_d(npwx*npol,nvecx), ew_d(nvecx), conv_d(nbnd) )
-!$acc host_data use_device( psi_d,  hpsi_d, spsi_d, ew_d, conv_d ) 
+  ALLOCATE ( psi_d(npwx,nvecx), hpsi_d(npwx,nvecx), spsi_d(npwx,nvecx), ew_d(nvecx) )
+
+!$acc data create( conv_d(nbnd), psi_d(npwx,nvecx), hpsi_d(npwx,nvecx), spsi_d(npwx,nvecx), ew_d(nvecx) ) 
+!$acc host_data use_device( conv_d, psi_d, hpsi_d, spsi_d, ew_d ) 
 
   CALL start_clock( 'paro:init' ); 
   conv(:) =  .FALSE. ; nconv = COUNT ( conv(:) )
@@ -126,10 +129,11 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
   do ii = 1, nbnd
     conv_d(ii) = .FALSE.
   end do  
+
 !$acc parallel loop collapse(2)
-  DO ii = 1, npwx*npol
-    DO jj = 1, nbnd
-      psi_d(ii,jj) = evc_d(ii,jj)
+  DO ii = 1, npwx
+    DO jj = 1, nbnd 
+      psi_d(ii,jj) = evc_d(ii,jj) ! copy input evc into work vector
     END DO 
   END DO
 
@@ -141,23 +145,24 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 #if defined(__MPI)
   IF ( nproc_ortho == 1 ) THEN
 #endif
-     CALL rotate_HSpsi_k_acc (  npwx, npw, nbnd, nbnd, npol, psi_d, hpsi_d, overlap, spsi_d, eig_d )
+     CALL rotate_HSpsi_gamma_gpu (  npwx, npw, nbnd, nbnd, psi_d, hpsi_d, overlap, spsi_d, eig_d )
 #if defined(__MPI)
   ELSE
 !civn 2fix
-     ALLOCATE ( psi(npwx*npol,nvecx), hpsi(npwx*npol,nvecx), spsi(npwx*npol,nvecx), eig(nbnd) )
-     psi = psi_d
+     ALLOCATE ( psi(npwx,nvecx), hpsi(npwx,nvecx), spsi(npwx,nvecx), eig(nbnd) )
+     eig = eig_d
+     psi  = psi_d
      hpsi = hpsi_d
      spsi = spsi_d
-     eig = eig_d
-     CALL protate_HSpsi_k(  npwx, npw, nbnd, nbnd, npol, psi, hpsi, overlap, spsi, eig )
-     psi_d = psi
-     hpsi_d = hpsi
-     spsi_d = spsi
+     CALL protate_HSpsi_gamma(  npwx, npw, nbnd, nbnd, psi, hpsi, overlap, spsi, eig )
      eig_d = eig
+     psi_d   =  psi  
+     hpsi_d  =  hpsi 
+     spsi_d  =  spsi 
      DEALLOCATE ( psi, hpsi, spsi, eig )
   ENDIF
 #endif
+
   !write (6,'(10f10.4)') psi(1:5,1:3)
 
   !write (6,*) eig(1:nbnd)
@@ -195,13 +200,13 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
      lbnd = 1; kbnd = 1
      DO ibnd = 1, ntrust ! pack unconverged roots in the available space
         IF (.NOT.conv(ibnd) ) THEN
-!$acc parallel loop 
-           DO ii = 1, npwx*npol
+!$acc parallel loop
+           DO ii = 1, npwx
              psi_d (ii,nbase+kbnd)  = psi_d(ii,ibnd)
              hpsi_d(ii,nbase+kbnd) = hpsi_d(ii,ibnd)
              spsi_d(ii,nbase+kbnd) = spsi_d(ii,ibnd)
            END DO 
-!$acc parallel loop
+!$acc parallel loop 
            DO ii = 1, 1
              ew_d(kbnd) = eig_d(ibnd) 
            END DO 
@@ -210,54 +215,54 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
         END IF
      END DO
      DO ibnd = nbnd+1, nbase   ! add extra vectors if it is the case
-!$acc parallel loop
-        DO ii = 1, npwx*npol
+!$acc parallel loop 
+        DO ii = 1, npwx
           psi_d (ii,nbase+kbnd)  = psi_d(ii,ibnd)
           hpsi_d(ii,nbase+kbnd) = hpsi_d(ii,ibnd)
           spsi_d(ii,nbase+kbnd) = spsi_d(ii,ibnd)
-        END DO
+        END DO 
 !$acc parallel loop 
         DO ii = 1, 1
           ew_d(kbnd) = eig_d(last_unconverged)
         END DO 
         lbnd=lbnd+1 ; kbnd=kbnd+recv_counts(mod(lbnd-2,nbgrp)+1); if (kbnd>nactive) kbnd=kbnd+1-nactive
      END DO
-!$acc parallel loop 
-     DO jj = 1, how_many  
-       kk = jj + ibnd_start - 1
+!$acc parallel loop
+     DO ii = 1, npwx
 !$acc loop
-       DO ii = 1, npwx*npol
-         psi_d (ii,nbase+jj) = psi_d (ii,nbase+kk)
-         hpsi_d(ii,nbase+jj) = hpsi_d(ii,nbase+kk)
-         spsi_d(ii,nbase+jj) = spsi_d(ii,nbase+kk)
-       END DO
-     END DO
-!$acc parallel loop 
-     DO ii = 1, how_many
-       ew_d(ii) = ew_d(ii+ibnd_start-1)
+       DO jj = nbase+1, nbase+how_many  
+         kk = jj + ibnd_start - 1
+         psi_d (ii,jj) = psi_d (ii,kk)
+         hpsi_d(ii,jj) = hpsi_d(ii,kk)
+         spsi_d(ii,jj) = spsi_d(ii,kk)
+       END DO 
      END DO 
+!$acc parallel loop
+     DO ii = 1, how_many
+       kk = ii + ibnd_start - 1 
+       ew_d(ii) = ew_d(kk)
+     END DO 
+ 
      CALL stop_clock( 'paro:pack' ); 
-
-     !write (6,*) ' check nactive = ', lbnd, nactive, nconv
+   
+!     write (6,*) ' check nactive = ', lbnd, nactive
      if (lbnd .ne. nactive+1 ) stop ' nactive check FAILED '
-
-     CALL bpcg_k_acc(hs_psi_gpu, g_1psi_gpu, psi_d, spsi_d, npw, npwx, nbnd, npol, how_many, &
+     CALL bpcg_gamma_gpu(hs_psi_gpu, g_1psi_gpu, psi_d, spsi_d, npw, npwx, nbnd, how_many, &
                 psi_d(:,nbase+1), hpsi_d(:,nbase+1), spsi_d(:,nbase+1), ethr, ew_d(1), nhpsi)
-!
      CALL start_clock( 'paro:mp_bar' ); 
      CALL mp_barrier(inter_bgrp_comm)
      CALL stop_clock( 'paro:mp_bar' ); 
      CALL start_clock( 'paro:mp_sum' ); 
-!$acc parallel loop 
-     DO ii = 1, npwx*npol
-       DO jj = nbase+1, nbase+how_many  
-         kk = jj + ibnd_start - 1
-         psi_d (ii,kk) = psi_d (ii,jj) 
-         hpsi_d(ii,kk) = hpsi_d(ii,jj) 
-         spsi_d(ii,kk) = spsi_d(ii,jj) 
+!$acc parallel loop
+     DO ii = 1, npwx 
+!$acc loop
+       DO jj = nbase+1, nbase+how_many 
+         kk = jj + ibnd_start - 1 
+         psi_d(ii, kk)  = psi_d(ii, jj)        
+         hpsi_d(ii, kk) = hpsi_d(ii, jj)        
+         spsi_d(ii, kk) = spsi_d(ii, jj)        
        END DO 
      END DO 
-
      CALL mp_allgather(psi_d (:,nbase+1:ndiag), column_type, recv_counts, displs, inter_bgrp_comm)
      CALL mp_allgather(hpsi_d(:,nbase+1:ndiag), column_type, recv_counts, displs, inter_bgrp_comm)
      CALL mp_allgather(spsi_d(:,nbase+1:ndiag), column_type, recv_counts, displs, inter_bgrp_comm)
@@ -266,32 +271,33 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 #if defined(__MPI)
      IF ( nproc_ortho == 1 ) THEN
 #endif
-        CALL rotate_HSpsi_k_acc ( npwx, npw, ndiag, ndiag, npol, psi_d, hpsi_d, overlap, spsi_d, ew_d )
+        CALL rotate_HSpsi_gamma_gpu (  npwx, npw, ndiag, ndiag, psi_d, hpsi_d, overlap, spsi_d, ew_d )
 #if defined(__MPI)
      ELSE
 !civn 2fix
-        ALLOCATE ( psi(npwx*npol,nvecx), hpsi(npwx*npol,nvecx), spsi(npwx*npol,nvecx), ew(nvecx) )
-        psi = psi_d
-        hpsi = hpsi_d
-        spsi = spsi_d
+        ALLOCATE ( psi(npwx,nvecx), hpsi(npwx,nvecx), spsi(npwx,nvecx), ew(nvecx) )
         ew = ew_d
-        CALL protate_HSpsi_k( npwx, npw, ndiag, ndiag, npol, psi, hpsi, overlap, spsi, ew )
-        psi_d = psi
-        hpsi_d = hpsi
-        spsi_d = spsi
+        psi  =  psi_d   
+        hpsi =  hpsi_d  
+        spsi =  spsi_d  
+        CALL protate_HSpsi_gamma(  npwx, npw, ndiag, ndiag, psi, hpsi, overlap, spsi, ew )
         ew_d = ew
+        psi_d   =  psi  
+        hpsi_d  =  hpsi 
+        spsi_d  =  spsi 
         DEALLOCATE ( psi, hpsi, spsi, ew )
      ENDIF
 #endif
+
      !write (6,*) ' ew : ', ew(1:nbnd)
      ! only the first nbnd eigenvalues are relevant for convergence
      ! but only those that have actually been corrected should be trusted
      conv(1:nbnd) = .FALSE.
-!$acc parallel loop 
+!$acc parallel loop
      do ii = 1, nbnd
        conv_d(ii) = .FALSE.
      end do 
-!$acc parallel loop 
+!$acc parallel loop
      DO ii = 1, ntrust
        conv_d(ii) = ABS(ew_d(ii) - eig_d(ii)).LT.ethr 
      END DO 
@@ -302,20 +308,20 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
      END DO 
 !$acc end data
      nconv = COUNT(conv(1:ntrust)) ; notconv = nbnd - nconv
-!$acc parallel loop 
+!$acc parallel loop
      DO ii = 1, nbnd
        eig_d(ii)  = ew_d(ii)
-     END DO 
+     END DO
      IF ( nconv == nbnd ) EXIT ParO_loop
 
   END DO ParO_loop
 
 !$acc parallel loop collapse(2)
-  DO ii = 1, npwx*npol
-    DO jj = 1, nbnd  
+  DO ii = 1, npwx
+    DO jj = 1, nbnd
       evc_d(ii,jj) = psi_d(ii,jj)
     END DO 
-  END DO 
+  END DO
 
   CALL mp_sum(nhpsi,inter_bgrp_comm)
 
@@ -328,6 +334,6 @@ SUBROUTINE paro_k_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, overlap
 
   CALL mp_type_free( column_type )
 
-  CALL stop_clock( 'paro_k' ); !write (6,*) ' exit paro diag'
+  CALL stop_clock( 'paro_gamma' ); !write (6,*) ' exit paro diag'
 
-END SUBROUTINE paro_k_new_acc
+END SUBROUTINE paro_gamma_new_acc

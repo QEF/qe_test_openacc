@@ -149,8 +149,8 @@ SUBROUTINE regterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      IF( ierr /= 0 ) &
         CALL errore( ' regterg ',' cannot allocate spsi ', ABS(ierr) )
   END IF
-!$acc data create( spsi( npwx, nvecx ) )  if(uspp)
-!$acc host_data use_device( spsi ) if_present if(uspp)
+!$acc data create( spsi( npwx, nvecx ) )  
+!$acc host_data use_device( spsi )   
   !
   ALLOCATE( e_host( nvec ), STAT=ierr )
   IF( ierr /= 0 ) &
@@ -175,7 +175,7 @@ SUBROUTINE regterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   END DO 
   !
   IF (uspp ) THEN 
-!$acc parallel loop collapse(2)
+!$acc parallel loop collapse(2) 
     DO ii = 1, npwx
       DO jj = 1, nvecx
         spsi(ii,jj) = ZERO 
@@ -624,7 +624,7 @@ SUBROUTINE regterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   DEALLOCATE( e_host, ew_host )
   !
 !$acc end host_data 
-!$acc end data    
+!$acc end data 
 !$acc end host_data
 !$acc end data
 !$acc end data

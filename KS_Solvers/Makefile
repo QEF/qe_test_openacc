@@ -36,7 +36,9 @@ DENSE/rotate_wfc_k.o
 # GPU-related objects
 ALLOBJS += \
 Davidson/cegterg_gpu.o \
+Davidson/cegterg_acc.o \
 Davidson/regterg_gpu.o \
+Davidson/regterg_acc.o \
 DENSE/rotate_wfc_k_gpu.o \
 DENSE/rotate_wfc_gamma_gpu.o \
 CG/rcgdiagg_gpu.o \

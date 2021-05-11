@@ -9,7 +9,9 @@ DAVID = \
 cegterg.o \
 regterg.o \
 cegterg_gpu.o \
-regterg_gpu.o
+cegterg_acc.o \
+regterg_gpu.o \
+regterg_acc.o 
 
 ifdef PGI_POWER_WORKAROUND
 # Circumvents bug in the Power implementation of PGI compilers

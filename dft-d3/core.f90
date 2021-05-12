@@ -1583,6 +1583,15 @@ contains
     return
   end function lin
 
+  integer function lin_acc(i1,i2)
+!$acc routine(lin_acc) seq
+    integer i1,i2,idum1,idum2
+    idum1=max(i1,i2)
+    idum2=min(i1,i2)
+    lin_acc=idum2+idum1*(idum1-1)/2
+    return
+  end function lin_acc
+
 
   !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
   ! set cut-off radii
@@ -2838,8 +2847,14 @@ contains
     REAL(WP),PARAMETER::sr9=0.75d0
     REAL(WP),PARAMETER::alp9=-16.0d0
     REAL(WP) :: abcthr
-    INTEGER, DIMENSION(3) :: repmin,repmax
+!civn 
+    !INTEGER, DIMENSION(3) :: repmin,repmax
+    INTEGER :: repmin1, repmin2, repmin3, repmax1, repmax2, repmax3    
     ! REAL(WP) :: time1,time2
+!civn 
+    write(*,*) 'using pbcthreebody (acc)...'
+    Call start_clock('vdw-d3:threebody')
+!
 
     counter=0
     eabc=0.0d0
@@ -2849,14 +2864,20 @@ contains
 
     ! call cpu_time(time1)
 
+!$acc data copyin(xyz(3,n),r0ab(max_elem,max_elem),cc6ab(n*n),iz(n),repv(3),lat(3,3),jtau(3),ktau(3),jkvec(3),ikvec(3),ijvec(3),dumvec(3))
+
+!$acc parallel  private(jtau,ktau,jkvec,ikvec,ijvec,dumvec) reduction(+:eabc)
+!$acc loop 
     do iat=3,n
+!$acc loop 
       do jat=2,iat-1
         ijvec=xyz(:,jat)-xyz(:,iat)
-        ij=lin(iat,jat)
+        ij=lin_acc(iat,jat)
         r0ij=r0ab(iz(iat),iz(jat))
+!$acc loop 
         do kat=1,jat-1
-          ik=lin(iat,kat)
-          jk=lin(jat,kat)
+          ik=lin_acc(iat,kat)
+          jk=lin_acc(jat,kat)
           ikvec=xyz(:,kat)-xyz(:,iat)
           jkvec=xyz(:,kat)-xyz(:,jat)
           c9=-1.0d0*(cc6ab(ij)*cc6ab(ik)*cc6ab(jk))
@@ -2864,16 +2885,16 @@ contains
           r0ik=r0ab(iz(iat),iz(kat))
           r0jk=r0ab(iz(jat),iz(kat))
 
-
+!$acc loop 
           do jtaux=-repv(1),repv(1)
-            repmin(1)=max(-repv(1),jtaux-repv(1))
-            repmax(1)=min(repv(1),jtaux+repv(1))
+            repmin1=max(-repv(1),jtaux-repv(1))
+            repmax1=min(repv(1),jtaux+repv(1))
             do jtauy=-repv(2),repv(2)
-              repmin(2)=max(-repv(2),jtauy-repv(2))
-              repmax(2)=min(repv(2),jtauy+repv(2))
+              repmin2=max(-repv(2),jtauy-repv(2))
+              repmax2=min(repv(2),jtauy+repv(2))
               do jtauz=-repv(3),repv(3)
-                repmin(3)=max(-repv(3),jtauz-repv(3))
-                repmax(3)=min(repv(3),jtauz+repv(3))
+                repmin3=max(-repv(3),jtauz-repv(3))
+                repmax3=min(repv(3),jtauz+repv(3))
                 jtau=jtaux*lat(:,1)+jtauy*lat(:,2)+jtauz*lat(:,3)
                 dumvec=ijvec+jtau
                 dumvec=dumvec*dumvec
@@ -2882,10 +2903,10 @@ contains
 
                 rr0ij=DSQRT(rij2)/r0ij
 
-
-                do ktaux=repmin(1),repmax(1)
-                  do ktauy=repmin(2),repmax(2)
-                    do ktauz=repmin(3),repmax(3)
+!$acc loop collapse(3) 
+                do ktaux=repmin1,repmax1
+                  do ktauy=repmin2,repmax2
+                    do ktauz=repmin3,repmax3
                       ktau=ktaux*lat(:,1)+ktauy*lat(:,2)+ktauz*lat(:,3)
                       dumvec=ikvec+ktau
                       dumvec=dumvec*dumvec
@@ -2922,13 +2943,15 @@ contains
       end do
     end do
 
+!$acc loop 
     do iat=2,n
       jat=iat
-      ij=lin(iat,jat)
+      ij=lin_acc(iat,jat)
       ijvec=0.0d0
       r0ij=r0ab(iz(iat),iz(jat))
+!$acc loop 
       do kat=1,iat-1
-        jk=lin(jat,kat)
+        jk=lin_acc(jat,kat)
         ik=jk
         ikvec=xyz(:,kat)-xyz(:,iat)
         jkvec=ikvec
@@ -2936,15 +2959,16 @@ contains
 
         r0ik=r0ab(iz(iat),iz(kat))
         r0jk=r0ab(iz(jat),iz(kat))
+!$acc loop 
         do jtaux=-repv(1),repv(1)
-          repmin(1)=max(-repv(1),jtaux-repv(1))
-          repmax(1)=min(repv(1),jtaux+repv(1))
+          repmin1=max(-repv(1),jtaux-repv(1))
+          repmax1=min(repv(1),jtaux+repv(1))
           do jtauy=-repv(2),repv(2)
-            repmin(2)=max(-repv(2),jtauy-repv(2))
-            repmax(2)=min(repv(2),jtauy+repv(2))
+            repmin2=max(-repv(2),jtauy-repv(2))
+            repmax2=min(repv(2),jtauy+repv(2))
             do jtauz=-repv(3),repv(3)
-              repmin(3)=max(-repv(3),jtauz-repv(3))
-              repmax(3)=min(repv(3),jtauz+repv(3))
+              repmin3=max(-repv(3),jtauz-repv(3))
+              repmax3=min(repv(3),jtauz+repv(3))
               if (jtaux.eq.0 .and. jtauy.eq.0 .and. jtauz.eq.0) cycle
               jtau=jtaux*lat(:,1)+jtauy*lat(:,2)+jtauz*lat(:,3)
               dumvec=ijvec+jtau
@@ -2954,9 +2978,10 @@ contains
 
               rr0ij=DSQRT(rij2)/r0ij
 
-              do ktaux=repmin(1),repmax(1)
-                do ktauy=repmin(2),repmax(2)
-                  do ktauz=repmin(3),repmax(3)
+!$acc loop collapse(3) 
+              do ktaux=repmin1,repmax1
+                do ktauy=repmin2,repmax2
+                  do ktauz=repmin3,repmax3
                     ! every result * 0.5
                     ktau=ktaux*lat(:,1)+ktauy*lat(:,2)+ktauz*lat(:,3)
                     dumvec=ikvec+ktau
@@ -2991,11 +3016,13 @@ contains
       end do
     end do
 
+!$acc loop 
     do iat=2,n
+!$acc loop 
       do jat=1,iat-1
         kat=jat
-        ij=lin(iat,jat)
-        jk=lin(jat,kat)
+        ij=lin_acc(iat,jat)
+        jk=lin_acc(jat,kat)
         ik=ij
         ikvec=xyz(:,kat)-xyz(:,iat)
         ijvec=ikvec
@@ -3006,15 +3033,16 @@ contains
         r0ik=r0ij
         r0jk=r0ab(iz(jat),iz(kat))
 
+!$acc loop 
         do jtaux=-repv(1),repv(1)
-          repmin(1)=max(-repv(1),jtaux-repv(1))
-          repmax(1)=min(repv(1),jtaux+repv(1))
+          repmin1=max(-repv(1),jtaux-repv(1))
+          repmax1=min(repv(1),jtaux+repv(1))
           do jtauy=-repv(2),repv(2)
-            repmin(2)=max(-repv(2),jtauy-repv(2))
-            repmax(2)=min(repv(2),jtauy+repv(2))
+            repmin2=max(-repv(2),jtauy-repv(2))
+            repmax2=min(repv(2),jtauy+repv(2))
             do jtauz=-repv(3),repv(3)
-              repmin(3)=max(-repv(3),jtauz-repv(3))
-              repmax(3)=min(repv(3),jtauz+repv(3))
+              repmin3=max(-repv(3),jtauz-repv(3))
+              repmax3=min(repv(3),jtauz+repv(3))
               jtau=jtaux*lat(:,1)+jtauy*lat(:,2)+jtauz*lat(:,3)
               dumvec=ijvec+jtau
               dumvec=dumvec*dumvec
@@ -3023,9 +3051,10 @@ contains
 
               rr0ij=DSQRT(rij2)/r0ij
 
-              do ktaux=repmin(1),repmax(1)
-                do ktauy=repmin(2),repmax(2)
-                  do ktauz=repmin(3),repmax(3)
+!$acc loop collapse(3) 
+              do ktaux=repmin1,repmax1
+                do ktauy=repmin2,repmax2
+                  do ktauz=repmin3,repmax3
                     ! every result * 0.5
                     if (jtaux.eq.ktaux .and. jtauy.eq.ktauy&
                         & .and. jtauz.eq.ktauz) cycle
@@ -3066,11 +3095,12 @@ contains
     ! And finally the self interaction iat=jat=kat all
 
     idum=0
+!$acc loop 
     do iat=1,n
       jat=iat
       kat=iat
       ijvec=0.0d0
-      ij=lin(iat,iat)
+      ij=lin_acc(iat,iat)
       ik=ij
       jk=ij
       ikvec=ijvec
@@ -3080,15 +3110,16 @@ contains
       r0ij=r0ab(iz(iat),iz(iat))
       r0ik=r0ij
       r0jk=r0ij
+!$acc loop 
       do jtaux=-repv(1),repv(1)
-        repmin(1)=max(-repv(1),jtaux-repv(1))
-        repmax(1)=min(repv(1),jtaux+repv(1))
+        repmin1=max(-repv(1),jtaux-repv(1))
+        repmax1=min(repv(1),jtaux+repv(1))
         do jtauy=-repv(2),repv(2)
-          repmin(2)=max(-repv(2),jtauy-repv(2))
-          repmax(2)=min(repv(2),jtauy+repv(2))
+          repmin2=max(-repv(2),jtauy-repv(2))
+          repmax2=min(repv(2),jtauy+repv(2))
           do jtauz=-repv(3),repv(3)
-            repmin(3)=max(-repv(3),jtauz-repv(3))
-            repmax(3)=min(repv(3),jtauz+repv(3))
+            repmin3=max(-repv(3),jtauz-repv(3))
+            repmax3=min(repv(3),jtauz+repv(3))
             if (jtaux.eq.0 .and. jtauy.eq.0 .and. jtauz.eq.0) cycle
             jtau=jtaux*lat(:,1)+jtauy*lat(:,2)+jtauz*lat(:,3)
             dumvec=jtau
@@ -3097,9 +3128,10 @@ contains
             if (rij2.gt.abcthr)cycle
             rr0ij=DSQRT(rij2)/r0ij
 
-            do ktaux=repmin(1),repmax(1)
-              do ktauy=repmin(2),repmax(2)
-                do ktauz=repmin(3),repmax(3)
+!$acc loop collapse(3) 
+            do ktaux=repmin1,repmax1
+              do ktauy=repmin2,repmax2
+                do ktauz=repmin3,repmax3
                   if ((ktaux.eq.0) .and.( ktauy.eq.0) .and.( ktauz.eq.0))cycle
                   if ((ktaux.eq.jtaux) .and. (ktauy.eq.jtauy)&
                       & .and. (ktauz.eq.jtauz)) cycle
@@ -3138,8 +3170,13 @@ contains
         end do
       end do
 
-
     end do
+!$acc end parallel 
+!$acc end data
+
+!civn 
+    Call stop_clock('vdw-d3:threebody')
+!
 
   end subroutine pbcthreebody
 

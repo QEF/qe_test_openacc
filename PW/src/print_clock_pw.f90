@@ -68,6 +68,9 @@ SUBROUTINE print_clock_pw()
    CALL print_clock( 'vdW_ffts' )
    CALL print_clock( 'vdW_v' )
    CALL print_clock( 'vdW_kernel' ) 
+!civn 
+   CALL print_clock( 'vdw-d3:threebody ' )
+!
    
    IF (lxdm) THEN
       CALL print_clock('energy_xdm')

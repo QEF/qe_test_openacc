@@ -17,6 +17,7 @@ paro_gamma_new_acc.o  \
 paro_k_new_gpu.o \
 paro_k_new_acc.o \
 bpcg_gamma_gpu.o \
+bpcg_gamma_acc.o \
 bpcg_k_gpu.o \
 bpcg_k_acc.o
 

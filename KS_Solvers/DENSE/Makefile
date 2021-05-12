@@ -11,6 +11,7 @@ rotate_HSpsi_k.o \
 rotate_wfc_gamma.o \
 rotate_wfc_k.o \
 rotate_HSpsi_gamma_gpu.o \
+rotate_HSpsi_gamma_acc.o \
 rotate_HSpsi_k_gpu.o \
 rotate_HSpsi_k_acc.o \
 rotate_wfc_gamma_gpu.o \

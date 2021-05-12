@@ -145,7 +145,7 @@ SUBROUTINE paro_gamma_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, ove
 #if defined(__MPI)
   IF ( nproc_ortho == 1 ) THEN
 #endif
-     CALL rotate_HSpsi_gamma_gpu (  npwx, npw, nbnd, nbnd, psi_d, hpsi_d, overlap, spsi_d, eig_d )
+     CALL rotate_HSpsi_gamma_acc (  npwx, npw, nbnd, nbnd, psi_d, hpsi_d, overlap, spsi_d, eig_d )
 #if defined(__MPI)
   ELSE
 !civn 2fix
@@ -271,7 +271,7 @@ SUBROUTINE paro_gamma_new_acc( h_psi_gpu, s_psi_gpu, hs_psi_gpu, g_1psi_gpu, ove
 #if defined(__MPI)
      IF ( nproc_ortho == 1 ) THEN
 #endif
-        CALL rotate_HSpsi_gamma_gpu (  npwx, npw, ndiag, ndiag, psi_d, hpsi_d, overlap, spsi_d, ew_d )
+        CALL rotate_HSpsi_gamma_acc (  npwx, npw, ndiag, ndiag, psi_d, hpsi_d, overlap, spsi_d, ew_d )
 #if defined(__MPI)
      ELSE
 !civn 2fix

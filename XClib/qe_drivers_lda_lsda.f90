@@ -807,8 +807,8 @@ SUBROUTINE xc_lsda_acc( length, rho_in, zeta_in, ex_out, ec_out, vx_out, vc_out 
         !
         CALL lsd_lyp( rho, zeta, ec_, vc_up_, vc_dw_ )    ! from CP/FPMD (more_functionals)
         ec = ec + 0.81_DP * ec_
-        vc_up = 0.81_DP * vc_up_
-        vc_dw = 0.81_DP * vc_dw_
+        vc_up = vc_up + 0.81_DP * vc_up_
+        vc_dw = vc_dw + 0.81_DP * vc_dw_
         !     
      CASE( 13 )                                           ! 'B3LYP-V1R'
         !
@@ -819,8 +819,8 @@ SUBROUTINE xc_lsda_acc( length, rho_in, zeta_in, ex_out, ec_out, vx_out, vc_out 
         !
         CALL lsd_lyp( rho, zeta, ec_, vc_up_, vc_dw_ )    ! from CP/FPMD (more_functionals)
         ec = ec + 0.81_DP * ec_
-        vc_up = 0.81_DP * vc_up_
-        vc_dw = 0.81_DP * vc_dw_
+        vc_up = vc_up + 0.81_DP * vc_up_
+        vc_dw = vc_dw + 0.81_DP * vc_dw_
         !
      CASE( 14 )                                           ! 'X3LYP
         !

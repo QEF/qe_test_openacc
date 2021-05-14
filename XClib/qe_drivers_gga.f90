@@ -1738,8 +1738,10 @@ SUBROUTINE gcc_spin_acc( length, rho_in, zeta_io, grho_in, sc_out, v1c_out, v2c_
   REAL(DP) :: sc, v1c_up, v1c_dw, v2c
   !REAL(DP), PARAMETER :: small=1.E-10_DP !, epsr=1.E-6_DP
   !
+  !WHERE ( ABS(zeta_io(:))<=1.0_DP ) zeta_io(:) = SIGN( MIN(ABS(zeta_io(:)), &
+  !                                  (1.0_DP-rho_threshold_gga)), zeta_io(:) )
   !
-!$acc data copyin(rho_in, zeta_io, grho_in), copyout(zeta_io, sc_out, v1c_out, v2c_out)
+!$acc data copyin(rho_in, grho_in), copyout(sc_out, v1c_out, v2c_out), copy(zeta_io)
 !$acc parallel loop  
   DO ir = 1, length
     !

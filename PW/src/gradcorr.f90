@@ -173,11 +173,6 @@ SUBROUTINE gradcorr( rho, rhog, rho_core, rhog_core, etxc, vtxc, v )
      !
      DEALLOCATE( v2c_ud )
      !
-     
-     print *, 'eeeeee', etxcgc, vtxcgc
-     
-     
-     
   ENDIF
   !
   !

@@ -1576,22 +1576,13 @@ contains
 
 
   integer function lin(i1,i2)
+!$acc routine  seq
     integer i1,i2,idum1,idum2
     idum1=max(i1,i2)
     idum2=min(i1,i2)
     lin=idum2+idum1*(idum1-1)/2
     return
   end function lin
-
-  integer function lin_acc(i1,i2)
-!$acc routine(lin_acc) seq
-    integer i1,i2,idum1,idum2
-    idum1=max(i1,i2)
-    idum2=min(i1,i2)
-    lin_acc=idum2+idum1*(idum1-1)/2
-    return
-  end function lin_acc
-
 
   !CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
   ! set cut-off radii
@@ -2877,20 +2868,22 @@ contains
     repv2 = repv(2)
     repv3 = repv(3)
 !$acc data copyin(xyz(3,n),iz(n),cc6ab(n*n),lat(3,3),r0ab(max_elem,max_elem)) 
-!$acc kernels 
-!$acc loop gang 
+!$acc kernels  vector_length(32)
+!$acc loop collapse(2) gang private(ijvec1,ijvec2,ijvec3, ikvec1,ikvec2,ikvec3, jkvec1,jkvec2,jkvec3, c9, r0ij,r0ik,r0jk, &
+!$acc&                              repmin1,repmin2,repmin3, repmax1,repmax2,repmax3, jtau1,jtau2,jtau3, &
+!$acc&                              dumvec11,dumvec12,dumvec13,rij2,rr0ij)  reduction(+:eabc)
     do iat=3,n
-!$acc loop gang 
-      do jat=2,iat-1
+     do jat = 2, n
+        if(jat.ge.iat) cycle
         ijvec1=xyz(1,jat)-xyz(1,iat)
         ijvec2=xyz(2,jat)-xyz(2,iat)
         ijvec3=xyz(3,jat)-xyz(3,iat)
-        ij=lin_acc(iat,jat)
+        ij=lin(iat,jat)
         r0ij=r0ab(iz(iat),iz(jat))
-!$acc loop gang 
+!$acc loop seq
         do kat=1,jat-1
-          ik=lin_acc(iat,kat)
-          jk=lin_acc(jat,kat)
+          ik=lin(iat,kat)
+          jk=lin(jat,kat)
           ikvec1=xyz(1,kat)-xyz(1,iat)
           ikvec2=xyz(2,kat)-xyz(2,iat)
           ikvec3=xyz(3,kat)-xyz(3,iat)
@@ -2902,7 +2895,6 @@ contains
           r0ik=r0ab(iz(iat),iz(kat))
           r0jk=r0ab(iz(jat),iz(kat))
 
-!$acc loop vector collapse(3) 
           do jtaux=-repv1,repv1
             do jtauy=-repv2,repv2
               do jtauz=-repv3,repv3
@@ -2928,7 +2920,7 @@ contains
 
                 rr0ij=DSQRT(rij2)/r0ij
 
-!$acc loop vector collapse(3) reduction(+:eabc)
+!$acc loop vector collapse(3) private(ktau1,ktau2,ktau3,dumvec21,dumvec22,dumvec23,rik2,rr0ik,rjk2,rr0jk,geomean,fdamp,tmp1,tmp2,tmp3,tmp4,ang) reduction(+:eabc)
                 do ktaux=repmin1,repmax1
                   do ktauy=repmin2,repmax2
                     do ktauz=repmin3,repmax3

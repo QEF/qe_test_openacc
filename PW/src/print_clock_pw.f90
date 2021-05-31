@@ -69,7 +69,8 @@ SUBROUTINE print_clock_pw()
    CALL print_clock( 'vdW_v' )
    CALL print_clock( 'vdW_kernel' ) 
 !civn 
-   CALL print_clock( 'vdw-d3:threebody ' )
+   CALL print_clock( 'dftd3' )
+   CALL print_clock( 'dftd3:three' )
 !
    
    IF (lxdm) THEN

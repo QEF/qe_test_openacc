@@ -2852,7 +2852,7 @@ contains
     ! REAL(WP) :: time1,time2
 !civn 
     write(*,*) 'using pbcthreebody (acc)...'
-    Call start_clock('vdw-d3:threebody')
+    Call start_clock('dftd3:three')
 !
 
     counter=0
@@ -3194,7 +3194,7 @@ contains
     end do
 
 !civn 
-    Call stop_clock('vdw-d3:threebody')
+    Call stop_clock('dftd3:three')
 !
 
   end subroutine pbcthreebody

@@ -242,6 +242,8 @@ contains
     real(wp) :: rtmp3(3)
     integer :: rep_cn(3), rep_vdw(3)
 
+    Call start_clock('dftd3')
+
     if (present(grads) .neqv. present(stress)) then
       write(*,*) "!!! Error in dftd3_pbc_dispersion"
       write(*,*) "Either both grads and stress must be present or none of them"
@@ -282,6 +284,8 @@ contains
     stress(:,:) = -matmul(stress, transpose(latvecs))&
         & / abs(determinant(latvecs))
     
+    Call stop_clock('dftd3')
+
   end subroutine dftd3_pbc_dispersion
 
 

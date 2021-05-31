@@ -386,7 +386,10 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
           ELSE IF ( isolve == 2 ) THEN
              IF (.not. use_gpu) THEN
                CALL using_evc(1);  CALL using_et(1); CALL using_h_diag(0) ! precontidtion has intent(in)
-               CALL ppcg_gamma( h_psi, s_psi, okvan, h_diag, &
+!civn 
+!              CALL ppcg_gamma( h_psi, s_psi, okvan, h_diag, &
+               CALL ppcg_gamma_idx( h_psi, s_psi, okvan, h_diag, &
+!
                            npwx, npw, nbnd, evc, et(1,ik), btype(1,ik), &
                            0.1d0*ethr, max_ppcg_iter, notconv, ppcg_iter, sbsize , rrstep, iter )
                !
@@ -635,7 +638,10 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
              IF ( .not. use_gpu ) THEN
                CALL using_evc(1); CALL using_et(1); CALL using_h_diag(0)
                ! BEWARE npol should be added to the arguments
-               CALL ppcg_k( h_psi, s_psi, okvan, h_diag, &
+!civn 
+!              CALL ppcg_k( h_psi, s_psi, okvan, h_diag, &
+               CALL ppcg_k_idx( h_psi, s_psi, okvan, h_diag, &
+!
                            npwx, npw, nbnd, npol, evc, et(1,ik), btype(1,ik), &
                            0.1d0*ethr, max_ppcg_iter, notconv, ppcg_iter, sbsize , rrstep, iter )
                !

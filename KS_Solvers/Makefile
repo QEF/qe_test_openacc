@@ -19,7 +19,9 @@ Davidson/regterg.o \
 CG/ccgdiagg.o \
 CG/rcgdiagg.o \
 PPCG/ppcg_gamma.o \
+PPCG/ppcg_gamma_idx.o \
 PPCG/ppcg_k.o \
+PPCG/ppcg_k_idx.o \
 ParO/bpcg_gamma.o \
 ParO/bpcg_k.o \
 ParO/paro_gamma.o \

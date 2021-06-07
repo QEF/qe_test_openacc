@@ -10,9 +10,11 @@ generic_cublas.o \
 ppcg_gamma.o \
 ppcg_gamma_gpu.o \
 ppcg_gamma_idx.o \
+ppcg_gamma_idx_acc.o \
 ppcg_k.o \
 ppcg_k_gpu.o \
 ppcg_k_idx.o \
+ppcg_k_idx_acc.o \
 
 all : libppcg.a
 

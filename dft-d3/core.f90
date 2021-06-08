@@ -884,8 +884,10 @@ contains
           end if
         end do
       end do
-
-      if (noabc)return
+!civn 
+!      if (noabc)return
+      if (.not.noabc) then 
+!
 
       ! compute non-additive third-order energy using averaged C6
       do iat=1,n
@@ -920,6 +922,9 @@ contains
       end do
 
     end if
+!civn 
+    end if
+!
 
   end subroutine edisp
 
@@ -2455,6 +2460,9 @@ contains
     real(wp) dx,dy,dz,r,damp,xn,rr,rco,tau(3)
     real(wp), INTENT(IN) :: crit_cn
 
+!civn 
+    call start_clock('dftd3:ncoor')
+!
     do i=1,natoms
       xn=0.0d0
       do iat=1,natoms
@@ -2484,6 +2492,9 @@ contains
       end do
       cn(i)=xn
     end do
+!civn 
+    call stop_clock('dftd3:ncoor')
+!
 
   end subroutine pbcncoord
 
@@ -2520,6 +2531,9 @@ contains
     real(wp) bj_dmp6,bj_dmp8
     real(wp) tmp1,tmp2
 
+!civn 
+    call start_clock('dftd3:edisp')
+!
 
     e6 =0
     e8 =0
@@ -2806,13 +2820,18 @@ contains
 
     end if
 
-
-    if (noabc)return
+!civn 
+    !if (noabc)return
+    if (.not.noabc) then 
 
     ! compute non-additive third-order energy using averaged C6
     call pbcthreebody(max_elem,xyz,lat,n,iz,rep_cn,crit_cn,&
         & cc6ab,r0ab,e63)
 
+!civn 
+    end if 
+    call stop_clock('dftd3:edisp')
+!
   end subroutine pbcedisp
 
 
@@ -3267,6 +3286,9 @@ contains
     real(wp) abcthr,time1,time2,geomean2,r0av,dc9,dfdmp,dang,ang
     integer,dimension(3) ::repv,repmin,repmax,repmin2,repmax2
 
+!civn 
+    call start_clock('dftd3:gdisp')
+!
     ! R^2 cut-off
     rthr=crit_vdw
     abcthr=crit_cn
@@ -4720,6 +4742,9 @@ contains
       gnorm=sum(abs(stress(1:3,1:3)))
       write(*,*)'|G(stress)|=',gnorm
     end if
+!civn 
+    call stop_clock('dftd3:gdisp')
+!
 
   end subroutine pbcgdisp
 

@@ -270,9 +270,12 @@ contains
         & this%rthr, rep_vdw, this%cn_thr, rep_cn)
     disp = -e6 * this%s6 - e8 * this%s18 - e6abc
 
-    if (.not. present(grads)) then
-      return
-    end if
+!civn 
+!   if (.not. present(grads)) then
+!     return
+!   end if
+    if (present(grads)) then
+!
 
     grads(:,:) = 0.0_wp
     call pbcgdisp(max_elem, maxc, natom, coords, izp, this%c6ab, this%mxc, &
@@ -283,7 +286,10 @@ contains
     ! on return, so it needs to be converted to obtain the stress tensor.
     stress(:,:) = -matmul(stress, transpose(latvecs))&
         & / abs(determinant(latvecs))
-    
+
+!civn 
+    end if 
+!    
     Call stop_clock('dftd3')
 
   end subroutine dftd3_pbc_dispersion

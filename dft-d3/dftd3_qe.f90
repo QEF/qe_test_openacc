@@ -112,11 +112,20 @@ MODULE dftd3_qe
     real*8  :: cn(nat),rtmp3(3),c6,c8,dum,x
     !
     !
-    write(stdout,'( /, 5X, "--------------------------------------------" , &
-                  & /, 5X, "Parameters for DFT-D3 Dispersion Correction:" , &
-                  & /, 5X, "--------------------------------------------" , &
+!civn 
+!    write(stdout,'( /, 5X, "--------------------------------------------" , &
+!                  & /, 5X, "Parameters for DFT-D3 Dispersion Correction:" , &
+!                  & /, 5X, "--------------------------------------------" , &
+     write(stdout,'( /, 5X, "--------------------------------------------" )' )
+     if ( input_dftd3%threebody ) then
+        write(stdout,'(    5X, "DFT-D3 Dispersion Correction (3-body terms):")')
+     else
+        write(stdout,'(    5X, "DFT-D3 Dispersion Correction (no 3-body):")')
+     end if
+     write(stdout,'(    5X, "--------------------------------------------" , &
                   & /, 5X, "  Reference C6 values for interpolation: ",/, &
                   & /, 5X, "    atom   Coordination number   C6" )')
+!
     !
     do i=1,94
         do ata=1,nsp

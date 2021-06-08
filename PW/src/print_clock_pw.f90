@@ -70,7 +70,10 @@ SUBROUTINE print_clock_pw()
    CALL print_clock( 'vdW_kernel' ) 
 !civn 
    CALL print_clock( 'dftd3' )
+   CALL print_clock( 'dftd3:edisp' )
    CALL print_clock( 'dftd3:three' )
+   CALL print_clock( 'dftd3:ncoor' )
+   CALL print_clock( 'dftd3:gdisp' )
 !
    
    IF (lxdm) THEN

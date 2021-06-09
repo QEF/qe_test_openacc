@@ -3900,9 +3900,10 @@ contains
       rep_v3 = rep_v(3)
 !$acc data copyin(xyz(3,n),iz(n),lat(3,3),r0ab(max_elem,max_elem),c6save(n*(n+1)),dc6ij(n,n)) &
 !$acc&            copy(dc6i(n),drij(-rep_v3:rep_v3,-rep_v2:rep_v2,-rep_v1:rep_v1,n*(n+1)/2)) 
-!$acc kernels vector_length(32)
+!$acc parallel vector_length(32) no_create(dc6i, drij)
 !$acc loop collapse(3) gang private(ijvec1,ijvec2,ijvec3, ikvec1,ikvec2,ikvec3, jkvec1,jkvec2,jkvec3, c6ij,c6ik,c6jk,c9, linij,linik,linjk, &
-!$acc&                              jtau1,jtau2,jtau3, rij2,rr0ij, dc6i_iat,dc6i_jat,dc6i_kat, dc6i(n),drij(-rep_v3:rep_v3,-rep_v2:rep_v2,-rep_v1:rep_v1,n*(n+1)/2) ) 
+!$acc&                              jtau1,jtau2,jtau3, rij2,rr0ij, dc6i_iat,dc6i_jat,dc6i_kat, repmin1,repmin2,repmin3,repmax1,repmax2,repmax3 ) &
+!$acc&                              reduction(+:eabc) 
       do iat=3,n
         do jat=2, n
           do kat=1, n 
@@ -3931,13 +3932,15 @@ contains
             c6ik=c6save(linik)
             c6jk=c6save(linjk)
             c9=-1.0d0*dsqrt(c6ij*c6ik*c6jk)
-
+!$acc loop seq independent
             do jtaux=-rep_cn1,rep_cn1
               repmin1=max(-rep_cn1,jtaux-rep_cn1)
               repmax1=min(rep_cn1,jtaux+rep_cn1)
+!$acc loop seq independent
               do jtauy=-rep_cn2,rep_cn2
                 repmin2=max(-rep_cn2,jtauy-rep_cn2)
                 repmax2=min(rep_cn2,jtauy+rep_cn2)
+!$acc loop seq independent
                 do jtauz=-rep_cn3,rep_cn3
                   repmin3=max(-rep_cn3,jtauz-rep_cn3)
                   repmax3=min(rep_cn3,jtauz+rep_cn3)
@@ -3953,7 +3956,7 @@ contains
                   rr0ij=DSQRT(rij2)/r0ab(iz(iat),iz(jat))
 
 !$acc loop vector collapse(3) private(ktau1,ktau2,ktau3, dumvec1,dumvec2,dumvec3, rik2,rjk2,rr0ik,rr0jk, &
-!$acc&                                geomean,geomean2,geomean3,r0av,damp9,ang,dc6_rest,dfdmp,r,dang,tmp1,dc9, dc6i(n),drij(-rep_v3:rep_v3,-rep_v2:rep_v2,-rep_v1:rep_v1,n*(n+1)/2) ) &
+!$acc&                                geomean,geomean2,geomean3,r0av,damp9,ang,dc6_rest,dfdmp,r,dang,tmp1,dc9 ) &
 !$acc&                                reduction(+:eabc,dc6i_iat,dc6i_jat,dc6i_kat) 
                   do ktaux=repmin1,repmax1
                     do ktauy=repmin2,repmax2
@@ -4007,8 +4010,9 @@ contains
                             & /(r*geomean3*geomean2)
 
                         tmp1=-dang*c9*damp9+dfdmp/r*c9*ang
-                        drij(jtauz,jtauy,jtaux,linij)=&
-                            & drij(jtauz,jtauy,jtaux,linij)-tmp1
+!$acc atomic update
+                        drij(jtauz,jtauy,jtaux,linij)= drij(jtauz,jtauy,jtaux,linij)-tmp1
+!$acc end atomic 
 
                         !start calculating the derivatives of each part w.r.t. r_ik
 
@@ -4022,8 +4026,9 @@ contains
 
                         tmp1=-dang*c9*damp9+dfdmp/r*c9*ang
                         ! tmp1=-dc9
-                        drij(ktauz,ktauy,ktaux,linik)=&
-                            & drij(ktauz,ktauy,ktaux,linik)-tmp1
+!$acc atomic update
+                        drij(ktauz,ktauy,ktaux,linik)= drij(ktauz,ktauy,ktaux,linik)-tmp1
+!$acc end atomic
 
                         !
                         !start calculating the derivatives of each part w.r.t. r_jk
@@ -4036,8 +4041,9 @@ contains
                             & /(r*geomean3*geomean2)
 
                         tmp1=-dang*c9*damp9+dfdmp/r*c9*ang
-                        drij(ktauz-jtauz,ktauy-jtauy,ktaux-jtaux,linjk)=&
-                            & drij(ktauz-jtauz,ktauy-jtauy,ktaux-jtaux,linjk)-tmp1
+!$acc atomic update
+                        drij(ktauz-jtauz,ktauy-jtauy,ktaux-jtaux,linjk)= drij(ktauz-jtauz,ktauy-jtauy,ktaux-jtaux,linjk)-tmp1
+!$acc end atomic
 
                         !calculating the CN derivative dE_disp(ijk)/dCN(i)
 
@@ -4059,20 +4065,20 @@ contains
                 end do
               end do
             end do
-!$acc atomic write
+!$acc atomic update 
            dc6i(iat) = dc6i(iat) + dc6i_iat
 !$acc end atomic
-!$acc atomic write
+!$acc atomic update 
            dc6i(jat) = dc6i(jat) + dc6i_jat
 !$acc end atomic
-!$acc atomic write
+!$acc atomic update 
            dc6i(kat) = dc6i(kat) + dc6i_kat
 !$acc end atomic
           end do
         end do
       end do
 !civn 
-!$acc end kernels
+!$acc end parallel 
 !$acc end data 
 !
 

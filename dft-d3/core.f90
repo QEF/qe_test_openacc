@@ -3889,18 +3889,18 @@ contains
       rep_cn1 = rep_cn(1) 
       rep_cn2 = rep_cn(2) 
       rep_cn3 = rep_cn(3) 
-      repmin1 = repmin(1)
-      repmin2 = repmin(2)
-      repmin3 = repmin(3)
-      repmax1 = repmax(1)
-      repmax2 = repmax(2)
-      repmax3 = repmax(3)
-      rep_v1 = rep_v(1)
-      rep_v2 = rep_v(2)
-      rep_v3 = rep_v(3)
+!      repmin1 = repmin(1)
+!      repmin2 = repmin(2)
+!      repmin3 = repmin(3)
+!      repmax1 = repmax(1)
+!      repmax2 = repmax(2)
+!!      repmax3 = repmax(3)
+!      rep_v1 = rep_v(1)
+!      rep_v2 = rep_v(2)
+!      rep_v3 = rep_v(3)
 !$acc data copyin(xyz(3,n),iz(n),lat(3,3),r0ab(max_elem,max_elem),c6save(n*(n+1)),dc6ij(n,n)) &
-!$acc&            copy(dc6i(n),drij(-rep_v3:rep_v3,-rep_v2:rep_v2,-rep_v1:rep_v1,n*(n+1)/2)) 
-!$acc parallel vector_length(32) no_create(dc6i, drij, xyz, iz, lat, r0ab, c6save, dc6ij )
+!$acc&            copy(dc6i(n),drij(-rep_v(3):rep_v(3),-rep_v(2):rep_v(2),-rep_v(1):rep_v(1),n*(n+1)/2)) 
+!$acc parallel vector_length(32) 
 !$acc loop collapse(3) gang  private(ijvec1,ijvec2,ijvec3, ikvec1,ikvec2,ikvec3, jkvec1,jkvec2,jkvec3, c6ij,c6ik,c6jk,c9, linij,linik,linjk, &
 !$acc&                              jtau1,jtau2,jtau3, rij2,rr0ij, repmin1,repmin2,repmin3,repmax1,repmax2,repmax3 ) &
 !$acc&                       reduction(+:eabc) 
@@ -3951,7 +3951,7 @@ contains
                   rr0ij=DSQRT(rij2)/r0ab(iz(iat),iz(jat))
 
 
-!$acc loop vector collapse(3) private(ktau1,ktau2,ktau3, dumvec1,dumvec2,dumvec3, rik2,rjk2,rr0ik,rr0jk, &
+!$acc loop vector collapse(3) private(ktau1,ktau2,ktau3, jtau1,jtau2,jtau3, dumvec1,dumvec2,dumvec3, rij2,rik2,rjk2,rr0ij,rr0ik,rr0jk, &
 !$acc&                                geomean,geomean2,geomean3,r0av,damp9,ang,dc6_rest,dfdmp,r,dang,tmp1,dc9, c9,  &
 !$acc&                                repmin1,repmin2,repmin3,repmax1,repmax2,repmax3, iat,jat,kat, jtaux,jtauy,jtauz, linij,linik,linjk ) &
 !$acc&                        reduction(+:eabc) 

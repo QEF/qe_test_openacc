@@ -5,6 +5,8 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
+#define ZERO ( 0.D0, 0.D0 )
+#define ONE  ( 1.D0, 0.D0 )
 !
 !----------------------------------------------------------------------------
 SUBROUTINE rotate_wfc_k_gpu( h_psi_gpu, s_psi_gpu, overlap, &
@@ -167,3 +169,298 @@ SUBROUTINE rotate_wfc_k_gpu( h_psi_gpu, s_psi_gpu, overlap, &
   !
 END SUBROUTINE rotate_wfc_k_gpu
 !
+!
+!----------------------------------------------------------------------------
+SUBROUTINE protate_wfc_k_gpu( h_psi_gpu, s_psi_gpu, overlap, &
+                              npwx, npw, nstart, nbnd, npol, psi_d, evc_d, e_d )
+  !----------------------------------------------------------------------------
+  !
+  ! ... Parallel version of rotate_wfc for colinear, k-point calculations
+  !
+  USE util_param,       ONLY : DP
+  USE mp_bands_util,    ONLY : intra_bgrp_comm, inter_bgrp_comm, root_bgrp_id, nbgrp, my_bgrp_id
+  USE mp,               ONLY : mp_bcast, mp_root_sum, mp_sum, mp_barrier
+  !
+  IMPLICIT NONE
+  !
+  include 'laxlib.fh'
+  !
+  ! ... I/O variables
+  !
+  INTEGER, INTENT(IN) :: npw, npwx, nstart, nbnd, npol
+  ! dimension of the matrix to be diagonalized
+  ! leading dimension of matrix psi, as declared in the calling pgm unit
+  ! input number of states
+  ! output number of states
+  ! number of spin polarizations
+  LOGICAL :: overlap
+  ! if .FALSE. : S|psi> not needed
+  COMPLEX(DP) :: psi_d(npwx*npol,nstart), evc_d(npwx*npol,nbnd)
+  ! input and output eigenvectors (may overlap)
+  REAL(DP) :: e_d(nbnd)
+  ! eigenvalues
+#if defined(__CUDA)
+  attributes(DEVICE) :: psi_d, evc_d, e_d
+#endif
+  !
+  ! ... local variables
+  !
+  INTEGER :: kdim, kdmx
+  COMPLEX(DP), ALLOCATABLE :: hc(:,:), sc(:,:), vc(:,:)
+  REAL(DP),    ALLOCATABLE :: en(:)
+  !
+  COMPLEX(DP), ALLOCATABLE :: aux_d(:,:)
+#if defined(__CUDA)
+  attributes(DEVICE) :: aux_d
+#endif
+  !
+  INTEGER :: idesc(LAX_DESC_SIZE)
+    ! matrix distribution descriptors
+  INTEGER :: nx
+    ! maximum local block dimension
+  LOGICAL :: la_proc
+    ! flag to distinguish procs involved in linear algebra
+  LOGICAL :: do_distr_diag_inside_bgrp
+  INTEGER :: ortho_parent_comm
+  INTEGER, ALLOCATABLE :: idesc_ip( :, :, : )
+  INTEGER, ALLOCATABLE :: rank_ip( :, : )
+  !
+  EXTERNAL  h_psi_gpu,    s_psi_gpu
+    ! h_psi(npwx,npw,nvec,psi,hpsi)
+    !     calculates H|psi>
+    ! s_psi(npwx,npw,nvec,spsi)
+    !     calculates S|psi> (if needed)
+    !     Vectors psi,hpsi,spsi are dimensioned (npwx,npol,nvec)
+
+  call start_clock('protwfck')
+  !
+  CALL laxlib_getval( do_distr_diag_inside_bgrp = do_distr_diag_inside_bgrp, &
+       ortho_parent_comm = ortho_parent_comm )
+  CALL desc_init( nstart, nx, la_proc, idesc, rank_ip, idesc_ip )
+  !
+  IF ( npol == 1 ) THEN
+     !
+     kdim = npw
+     kdmx = npwx
+     !
+  ELSE
+     !
+     kdim = npwx*npol
+     kdmx = npwx*npol
+     !
+  END IF
+  !
+  ALLOCATE( aux_d(kdmx, nstart ) )
+  ALLOCATE( hc( nx, nx) )
+  ALLOCATE( sc( nx, nx) )
+  ALLOCATE( vc( nx, nx) )
+  ALLOCATE( en( nstart ) )
+
+  aux_d=(0.0_DP,0.0_DP)
+  !
+  ! ... Set up the Hamiltonian and Overlap matrix on the subspace :
+  !
+  ! ...      H_ij = <psi_i| H |psi_j>     S_ij = <psi_i| S |psi_j>
+  !
+  call start_clock('protwfck:hpsi')
+  CALL h_psi_gpu( npwx, npw, nstart, psi_d, aux_d )
+  call stop_clock('protwfck:hpsi')
+  !
+  call start_clock('protwfck:hc')
+  CALL compute_distmat_gpu( hc, psi_d, aux_d )
+  !
+  IF ( overlap ) THEN
+     !
+     CALL s_psi_gpu( npwx, npw, nstart, psi_d, aux_d )
+     CALL compute_distmat_gpu( sc, psi_d, aux_d )
+     !
+  ELSE
+     !
+     CALL compute_distmat_gpu( sc, psi_d, psi_d )
+     !
+  END IF
+  call stop_clock('protwfck:hc')
+  !
+  ! ... Diagonalize
+  !
+  call start_clock('protwfck:diag')
+  IF ( do_distr_diag_inside_bgrp ) THEN ! NB on output of pdiaghg en and vc are the same across ortho_parent_comm
+     ! only the first bgrp performs the diagonalization
+     IF( my_bgrp_id == root_bgrp_id ) CALL pdiaghg( nstart, hc, sc, nx, en, vc, idesc )
+     IF( nbgrp > 1 ) THEN ! results must be brodcast to the other band groups
+       CALL mp_bcast( vc, root_bgrp_id, inter_bgrp_comm )
+       CALL mp_bcast( en, root_bgrp_id, inter_bgrp_comm )
+     ENDIF
+  ELSE
+     CALL pdiaghg( nstart, hc, sc, nx, en, vc, idesc )
+  END IF
+  call stop_clock('protwfck:diag')
+  !
+  e_d(:) = en(1:nbnd)
+  !
+  ! ... update the basis set
+  !
+  call start_clock('protwfck:evc')
+  CALL refresh_evc_gpu()
+  !
+  evc_d(:,:) = aux_d(:,1:nbnd)
+  call stop_clock('protwfck:evc')
+  !
+  DEALLOCATE( en )
+  DEALLOCATE( vc )
+  DEALLOCATE( sc )
+  DEALLOCATE( hc )
+  !
+  DEALLOCATE( idesc_ip )
+  DEALLOCATE( rank_ip )
+  call stop_clock('protwfck')
+  !
+  RETURN
+  !
+  !
+CONTAINS
+  !
+  SUBROUTINE compute_distmat_gpu( dm, v, w )
+     !
+     !  This subroutine compute <vi|wj> and store the
+     !  result in distributed matrix dm
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
+     !
+     INTEGER :: ipc, ipr
+     INTEGER :: nr, nc, ir, ic, root
+     COMPLEX(DP), INTENT(OUT) :: dm( :, : )
+     COMPLEX(DP) :: v(:,:), w(:,:)
+     COMPLEX(DP), ALLOCATABLE :: work( :, : )
+     !
+     COMPLEX(DP), ALLOCATABLE :: work_d( :, : )
+#if defined(__CUDA)
+     attributes(DEVICE) :: v, w, work_d
+#endif
+     !
+     ALLOCATE( work_d( nx, nx ) )
+     !
+     work_d = ZERO
+     !
+     ALLOCATE( work( nx, nx ) )
+     !
+     work = ( 0.0_DP, 0.0_DP )
+     !
+     DO ipc = 1, idesc(LAX_DESC_NPC) ! loop on column procs
+        !
+        nc = idesc_ip( LAX_DESC_NC, 1, ipc )
+        ic = idesc_ip( LAX_DESC_IC, 1, ipc )
+        !
+        DO ipr = 1, ipc ! desc%npr ! ipc ! use symmetry for the loop on row procs
+           !
+           nr = idesc_ip( LAX_DESC_NR, ipr, ipc )
+           ir = idesc_ip( LAX_DESC_IR, ipr, ipc )
+           !
+           !  rank of the processor for which this block (ipr,ipc) is destinated
+           !
+           root = rank_ip( ipr, ipc )
+
+           ! use blas subs. on the matrix block
+
+           CALL ZGEMM( 'C', 'N', nr, nc, kdim, ( 1.D0, 0.D0 ),  v(1,ir), kdmx, w(1,ic), kdmx, ( 0.D0, 0.D0 ), work_d, nx )
+
+           work = work_d
+
+           ! accumulate result on dm of root proc.
+           CALL mp_root_sum( work, dm, root, ortho_parent_comm )
+
+        END DO
+        !
+     END DO
+     if (ortho_parent_comm.ne.intra_bgrp_comm .and. nbgrp > 1) dm = dm/nbgrp
+     !
+     CALL laxlib_zsqmher( nstart, dm, nx, idesc )
+     !
+     DEALLOCATE( work )
+     !
+     DEALLOCATE( work_d )
+     !
+     RETURN
+  END SUBROUTINE compute_distmat_gpu
+
+
+  SUBROUTINE refresh_evc_gpu( )
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
+     !
+     INTEGER :: ipc, ipr
+     INTEGER :: nr, nc, ir, ic, root
+     COMPLEX(DP), ALLOCATABLE :: vtmp( :, : )
+     COMPLEX(DP) :: beta
+     !
+     COMPLEX(DP), ALLOCATABLE :: work_d(:,:)
+#if defined(__CUDA)
+     attributes(DEVICE) :: work_d
+#endif
+     !
+     ALLOCATE( work_d( nx, nx ) )
+     !
+     work_d = ZERO
+     !
+     ALLOCATE( vtmp( nx, nx ) )
+     !
+     DO ipc = 1, idesc(LAX_DESC_NPC)
+        !
+        nc = idesc_ip( LAX_DESC_NC, 1, ipc )
+        ic = idesc_ip( LAX_DESC_IC, 1, ipc )
+        !
+        IF( ic <= nbnd ) THEN
+           !
+           nc = min( nc, nbnd - ic + 1 )
+           !
+           beta = ( 0.D0, 0.D0 )
+
+           DO ipr = 1, idesc(LAX_DESC_NPR)
+              !
+              nr = idesc_ip( LAX_DESC_NR, ipr, ipc )
+              ir = idesc_ip( LAX_DESC_IR, ipr, ipc )
+              !
+              root = rank_ip( ipr, ipc )
+
+              IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
+                 !
+                 !  this proc sends his block
+                 !
+                 CALL mp_bcast( vc(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d = vc
+                 !
+                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ( 1.D0, 0.D0 ), psi_d(1,ir), kdmx, work_d, nx, beta, aux_d(1,ic), kdmx )
+                 !
+              ELSE
+                 !
+                 !  all other procs receive
+                 !
+                 CALL mp_bcast( vtmp(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d = vtmp
+                 !
+                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ( 1.D0, 0.D0 ), psi_d(1,ir), kdmx, work_d, nx, beta, aux_d(1,ic), kdmx )
+                 !
+              END IF
+              !
+              beta = ( 1.D0, 0.D0 )
+
+           END DO
+           !
+        END IF
+        !
+     END DO
+     !
+     DEALLOCATE( vtmp )
+     !
+     DEALLOCATE( work_d )
+     !
+     RETURN
+  END SUBROUTINE refresh_evc_gpu
+
+END SUBROUTINE protate_wfc_k_gpu

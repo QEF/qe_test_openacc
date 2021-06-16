@@ -139,17 +139,16 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
   iter      =  1
   force_repmat = .FALSE.
   !
-!$acc data deviceptr( psi(npwx*npol,nbnd), e(nbnd) )
-
+!$acc data copy(psi(npwx*npol,nbnd), e(nbnd), precondition(npw))
+  !
   CALL allocate_all
   !
 !obas
 !$acc data create( buffer1(kdimx,sbsize), hpsi(kdimx,nbnd), w(kdimx,nbnd), hw(kdimx,nbnd), p(kdimx,nbnd), &
-!$acc&             hp(kdimx,nbnd), K(kdimx,sbsize), M(kdimx,nbnd), G(nbnd,nbnd))
-!$acc host_data use_device( buffer1, hpsi, w, hw, p, hp, K, M, G)
+!$acc&             hp(kdimx,nbnd), G(nbnd,nbnd),coord_psi(sbsize,sbsize), coord_w(sbsize,sbsize), &
+!$acc&             coord_p(sbsize,sbsize), G1(nbnd, nbnd), K(sbsize3, sbsize3), M(sbsize3, sbsize3))
 
-!$acc data create( spsi(kdimx,nbnd), sw(kdimx,nbnd), sp(kdimx,nbnd)) if(overlap)
-!$acc host_data use_device( spsi, sw, sp ) if(overlap)        
+!$acc data create( spsi(kdimx,nbnd), sp(kdimx,nbnd), sw(kdimx,nbnd)) if(overlap)
 
   ! ... Compute block residual w = hpsi - psi*(psi'hpsi) (psi is orthonormal on input)
   !
@@ -164,7 +163,11 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
       enddo
     enddo
   endif
+
+!$acc host_data use_device(hpsi, psi)
   CALL h_psi_gpu( npwx, npw, nbnd, psi, hpsi ) 
+!$acc end host_data
+
   if (clean)  then
 !$acc parallel loop collapse(2)
     do jj =1, nbnd
@@ -175,7 +178,9 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
   endif
 
   if (overlap) then 
+!$acc host_data use_device(spsi, psi)
     CALL s_psi_gpu( npwx, npw, nbnd, psi, spsi) 
+!$acc end host_data
     if (clean)  then
 !$acc parallel loop collapse(2)
       do jj =1, nbnd
@@ -196,16 +201,23 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
       G(ii,jj) = C_ZERO
     enddo
   enddo
+
   CALL divide(inter_bgrp_comm,nbnd,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nbnd,n_start,n_end
+!$acc host_data use_device(hpsi,G, psi)  
   if (n_start .le. n_end) &
   CALL gpu_ZGEMM('C','N', nbnd, my_n, kdim, C_ONE, psi, kdimx, hpsi(1,n_start), kdimx, C_ZERO, G(1,n_start), nbnd)
+!$acc end host_data
   CALL mp_sum( G, inter_bgrp_comm )
   CALL mp_sum( G, intra_bgrp_comm )
   call stop_clock('ppcg:zgemm')
   !
   !    w = hpsi - spsi*G
   call start_clock('ppcg:zgemm')
-  IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( w, 0.d0, 2*kdimx*nact )
+  IF ( my_bgrp_id /= root_bgrp_id ) THEN
+!$acc host_data use_device(w)          
+    call gpu_threaded_memset( w, C_ZERO, 2*kdimx*nact )
+!$acc end host_data
+  ENDIF
 !$acc parallel loop collapse(2)
   do jj =1, nact
     do ii = 1, kdimx
@@ -214,11 +226,15 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
   enddo
   CALL divide(inter_bgrp_comm,nbnd,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nbnd,n_start,n_end
   if (overlap) then
+!$acc host_data use_device(spsi,G,w)          
      if (n_start .le. n_end) &
      CALL gpu_ZGEMM('N','N',kdim, nbnd, my_n, -C_ONE,spsi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, w, kdimx)
+!$acc end host_data
   else
+!$acc host_data use_device(G,w, psi)
      if (n_start .le. n_end) &
      CALL gpu_ZGEMM('N','N',kdim, nbnd, my_n, -C_ONE, psi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, w, kdimx)
+!$acc end host_data
   end if
   CALL mp_sum( w, inter_bgrp_comm )
   call stop_clock('ppcg:zgemm')
@@ -227,6 +243,7 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
   ! ... Lock converged eigenpairs (set up act_idx and nact and store current nact in nact_old)
   call start_clock('ppcg:lock')
   nact_old = nact;
+!$acc update self(w)  
   CALL lock_epairs(kdim, nbnd, btype, w, kdimx, lock_tol, nact, act_idx)
   call stop_clock('ppcg:lock')
   !
@@ -239,13 +256,11 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
   ! ... Set up iteration parameters after locking
   CALL setup_param
   !
-!$acc data create(K_store(sbsize3, sbsize3*nsb), M_store(sbsize3,sbsize3*nsb))
-!$acc host_data use_device(K_store, M_store)
-
 !$acc parallel loop
   DO ii = 1, nact
     G1(ii,ii) = G(act_idx(ii), act_idx(ii))
   ENDDO
+!$acc update self(G1)  
   trG = get_trace( G1, nbnd, nact )
   !
   ! Print initial info ...
@@ -253,6 +268,7 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
      WRITE(stdout, '("Ethr: ",1pD9.2,", npw: ", I10, ", nbnd: ", I10, " , ",  &
               & "maxter: ",I5, ", sbsize:  ", I10,", nsb: ", I10 ,", nact: ", &
               & I10, ", trtol: ", 1pD9.2 )')  ethr, npw, nbnd, maxter, sbsize, nsb, nact, trtol
+!$acc update self(w)      
      IF (print_info == 3) THEN
         res_array(iter) = print_rnrm( w, kdim, nbnd, kdimx)
         WRITE(stdout,'("Res. norm:  ", 1pD9.2)') res_array(iter)
@@ -283,10 +299,14 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
          G(ii,jj) = C_ZERO  
        ENDDO
      ENDDO  
+
      CALL divide(inter_bgrp_comm,nbnd,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nbnd,n_start,n_end
+!$acc host_data use_device(w, G, hw, psi)    
      if (overlap) then
+!$acc host_data use_device(spsi)             
         if (n_start .le. n_end) &
         CALL gpu_ZGEMM( 'C','N', my_n, nact, kdim, C_ONE, spsi(1,n_start), kdimx, w, kdimx, C_ZERO, G(n_start,1), nbnd )
+!$acc end host_data
      else
         if (n_start .le. n_end) &
         CALL gpu_ZGEMM( 'C','N', my_n, nact, kdim, C_ONE,psi(1,n_start), kdimx, w, kdimx, C_ZERO, G(n_start,1), nbnd )
@@ -297,7 +317,7 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
      !
      !     w = w - psi*G
      call start_clock('ppcg:zgemm')
-     IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( w, 0.d0, 2*kdimx*nact )  
+     IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( w, C_ZERO, 2*kdimx*nact )  
      if (n_start .le. n_end) &
      CALL gpu_ZGEMM('N','N', kdim, nact, my_n, -C_ONE, psi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, w, kdimx)
      CALL mp_sum( w(:,1:nact), inter_bgrp_comm )
@@ -306,12 +326,23 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
      ! ... Compute h*w
      call start_clock('ppcg:hpsi')
      CALL h_psi_gpu( npwx, npw, nact, w, hw )      
-     if (clean) hw (npw+1:npwx,1:nact) = C_ZERO
+!$acc end host_data    
+     if (clean) then 
+!$acc parallel loop collapse(2)
+       DO jj = 1, nact
+         DO ii = npw+1, npwx
+           hw (ii,jj) = C_ZERO
+         ENDDO
+       ENDDO  
+     endif  
      if (overlap) then ! ... Compute s*w
+
+!$acc host_data use_device(w, sw)             
         CALL s_psi_gpu( npwx, npw, nact, w, sw )   
+!$acc end host_data
 
         if (clean) then
-!$acc parallel loop collapse(2)
+!$acc parallel loop collapse(2) 
           DO jj = 1, nact
             DO ii = npw+1, npwx
               sw(ii,jj) = C_ZERO
@@ -333,10 +364,14 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
             G(ii,jj) = C_ZERO 
           ENDDO
         ENDDO  
+
+!$acc host_data use_device(p, G, hp, hpsi, psi)        
         CALL divide(inter_bgrp_comm,nact,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nact,n_start,n_end
         if (overlap) then
+!$acc host_data use_device(spsi)                
            if (n_start .le. n_end) &
            CALL gpu_ZGEMM('C','N', my_n, nact, kdim, C_ONE, spsi(1,n_start), kdimx, p, kdimx, C_ZERO, G(n_start,1), nbnd)
+!$acc end host_data   
         else
            if (n_start .le. n_end) &
            CALL gpu_ZGEMM('C','N', my_n, nact, kdim, C_ONE, psi(1,n_start), kdimx, p, kdimx, C_ZERO, G(n_start,1), nbnd)
@@ -347,39 +382,47 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
         !
         ! p = p - psi*G, hp = hp - hpsi*G, sp = sp - spsi*G
         call start_clock('ppcg:zgemm')
-        IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( p, 0.d0, 2*kdimx*nact )  
+        IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( p, C_ZERO, 2*kdimx*nact )  
         if (n_start .le. n_end) & ! could be done differently
         CALL gpu_ZGEMM('N','N', kdim, nact, my_n, -C_ONE, psi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, p, kdimx)
         CALL mp_sum( p(:,1:nact), inter_bgrp_comm )
         call stop_clock('ppcg:zgemm')
         !
         call start_clock('ppcg:zgemm')
-        IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( hp, 0.d0, 2*kdimx*nact )
+        IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( hp, C_ZERO, 2*kdimx*nact )
         if (n_start .le. n_end) &
         CALL gpu_ZGEMM('N','N', kdim, nact, my_n, -C_ONE, hpsi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, hp, kdimx)
         CALL mp_sum( hp(:,1:nact), inter_bgrp_comm )
         call stop_clock('ppcg:zgemm')
         !
         if (overlap) then
+!$acc host_data use_device(spsi, sp)                
            call start_clock('ppcg:zgemm')
-           IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( sp, 0.d0, 2*kdimx*nact )
+           IF ( my_bgrp_id /= root_bgrp_id ) call gpu_threaded_memset( sp, C_ZERO, 2*kdimx*nact )
            if (n_start .le. n_end) &
            CALL gpu_ZGEMM('N','N', kdim, nact, my_n, -C_ONE, spsi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, sp, kdimx)
            CALL mp_sum( sp(:,1:nact), inter_bgrp_comm )
            call stop_clock('ppcg:zgemm')
+!$acc end host_data           
         end if
+!$acc end host_data
+        
      END IF
      !
      !  ... for each sub-block construct the small projected matrices K and M
      !      and store in K_store and M_store
      !
-!$acc parallel loop collapse(2)
-     DO jj = 1 , sbsize3*nsb
-       DO ii = 1, sbsize3
-         K_store(ii,jj) = C_ZERO
-         M_store(ii,jj) = C_ZERO
-       ENDDO
-     ENDDO  
+!!!!$acc data create(K_store(sbsize3, sbsize3*nsb), M_store(sbsize3,sbsize3*nsb))     
+!
+!!$acc parallel loop collapse(2)
+!     DO jj = 1 , sbsize3*nsb
+!       DO ii = 1, sbsize3
+!         K_store(ii,jj) = C_ZERO
+!         M_store(ii,jj) = C_ZERO
+!       ENDDO
+!     ENDDO  
+     K_store = C_ZERO
+     M_store = C_ZERO
      !
      CALL divide(inter_bgrp_comm,nsb,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nsb,n_start,n_end
      DO j = n_start, n_end
@@ -403,38 +446,68 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
         !
 !civn sbsize --> l  ? 
         call start_clock('ppcg:zgemm')
+!$acc host_data use_device(hpsi, K, psi)
         CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, hpsi(1,(j-1)*sbsize + 1), &
                 kdimx, C_ZERO, K, sbsize3)
-!SONO ARRIVATO QUI
+!$acc end host_data
+
         if (overlap) then
            if (clean) then
-             spsi(npw+1:npwx,(j-1)*sbsize+1:(j-1)*sbsize+l) = C_ZERO 
+!$acc parallel loop collapse(2) 
+             DO jj = (j-1)*sbsize+1, (j-1)*sbsize+l
+               DO ii = npw+1, npwx 
+                 spsi(ii,jj) = C_ZERO 
+               ENDDO
+             ENDDO   
            endif
 
-           CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, spsi(1,(j-1)*sbsize + 1), &
+!$acc host_data use_device(spsi, M, psi)
+           CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, spsi(1,(j-1)*sbsize + 1), &
                                                                                        kdimx, C_ZERO, M, sbsize3)
+!$acc end host_data
         else
-           CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, psi(1,(j-1)*sbsize + 1), &
+!$acc host_data use_device(M,psi)
+           CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, psi(1,(j-1)*sbsize + 1), &
                                                                                        kdimx, C_ZERO, M, sbsize3)
+!$acc end host_data
         end if
-        CALL ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, hw(1,(j-1)*sbsize + 1), &
+!$acc host_data use_device(w, hw, K)
+        CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, hw(1,(j-1)*sbsize + 1), &
                                                                            kdimx, C_ZERO, K(l+1, l+1), sbsize3)
+!$acc end host_data
         if (overlap) then
-           CALL ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, sw(1,(j-1)*sbsize + 1), kdimx, &
+!$acc host_data use_device(w, sw, M)
+           CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, sw(1,(j-1)*sbsize + 1), kdimx, &
                                                                                     C_ZERO, M(l+1, l+1 ), sbsize3)
+!$acc end host_data
         else
-           CALL ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, w(1,(j-1)*sbsize + 1), kdimx, &
+!$acc host_data use_device(w, M)
+           CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, w(1,(j-1)*sbsize + 1), kdimx, &
                                                                                      C_ZERO, M(l+1, l+1 ), sbsize3)
+!$acc end host_data
         end if
-        if (clean) hw(npw+1:npwx,(j-1)*sbsize+1:(j-1)*sbsize+l) = C_ZERO
-        CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, hw(1,(j-1)*sbsize + 1), kdimx, &
+        if (clean) then
+!$acc parallel loop collapse(2)
+          DO jj = (j-1)*sbsize+1, (j-1)*sbsize+l
+            DO ii = npw+1, npwx 
+              hw(ii,jj) = C_ZERO
+            ENDDO
+          ENDDO  
+        endif
+!$acc host_data use_device(hw, K, psi)
+        CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, hw(1,(j-1)*sbsize + 1), kdimx, &
                                                                                         C_ZERO, K(1, l+1), sbsize3)
+!$acc end host_data
         if (overlap) then
-           CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, sw(1,(j-1)*sbsize + 1), kdimx, &
+!$acc host_data use_device(sw, M, psi)
+           CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, sw(1,(j-1)*sbsize + 1), kdimx, &
                                                                                           C_ZERO, M(1, l+1), sbsize3)
+!$acc end host_data
         else
-           CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, w(1,(j-1)*sbsize + 1), kdimx, &
+!$acc host_data use_device(w, M, psi)
+           CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, w(1,(j-1)*sbsize + 1), kdimx, &
                                                                                           C_ZERO, M(1, l+1), sbsize3)
+!$acc end host_data
         end if
         call stop_clock('ppcg:zgemm')
         !
@@ -442,23 +515,28 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
         !
 !ev        IF ( MOD(iter,rr_step) /= 1 ) THEN   ! In this case, P is skipped after each RR
         IF ( iter  /= 1 ) THEN
+!$acc host_data use_device(p, hp, K, w, M, psi)                
           call start_clock('ppcg:zgemm')
-          CALL ZGEMM('C','N', l, l, kdim, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, hp(1,(j-1)*sbsize + 1), &
+          CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, hp(1,(j-1)*sbsize + 1), &
                                                                        kdimx, C_ZERO, K(2*l + 1, 2*l+1), sbsize3)
           if (overlap) then
-             CALL ZGEMM('C','N', l, l, kdim, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, sp(1,(j-1)*sbsize + 1), &
+!$acc host_data use_device(sp)
+             CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, sp(1,(j-1)*sbsize + 1), &
                                                                          kdimx, C_ZERO, M(2*l + 1, 2*l+1), sbsize3)
+!$acc end host_data
           else
-             CALL ZGEMM('C','N', l, l, kdim, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, p(1,(j-1)*sbsize + 1), &
+             CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, p(1,(j-1)*sbsize + 1), &
                                                                          kdimx, C_ZERO, M(2*l + 1, 2*l+1), sbsize3)
           end if
-          CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, hp(1,(j-1)*sbsize + 1), kdimx, &
+          CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, hp(1,(j-1)*sbsize + 1), kdimx, &
                                                                                          C_ZERO, K(1, 2*l+1), sbsize3)
           if (overlap) then
-             CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, sp(1,(j-1)*sbsize + 1), kdimx, &
+!$acc host_data use_device(sp)
+             CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, sp(1,(j-1)*sbsize + 1), kdimx, &
                                                                                          C_ZERO, M(1, 2*l+1), sbsize3)
+!$acc end host_data
           else
-             CALL ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, p(1,(j-1)*sbsize + 1), kdimx, &
+             CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, p(1,(j-1)*sbsize + 1), kdimx, &
                                                                                        C_ZERO, M(1, 2*l+1), sbsize3)
           end if
           call stop_clock('ppcg:zgemm')
@@ -466,22 +544,33 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
           ! ---
           !
           call start_clock('ppcg:zgemm')
-          CALL ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, hp(1,(j-1)*sbsize + 1), kdimx, &
+          CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, hp(1,(j-1)*sbsize + 1), kdimx, &
                                                                                    C_ZERO, K(l+1, 2*l+1), sbsize3)
           if (overlap) then
-             CALL ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, sp(1,(j-1)*sbsize + 1), kdimx, &
+!$acc host_data use_device(sp)                  
+             CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, sp(1,(j-1)*sbsize + 1), kdimx, &
                                                                             C_ZERO, M(l+1, 2*l+1), sbsize3)
+!$acc end host_data
           else
-             CALL ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, p(1,(j-1)*sbsize + 1), kdimx, &
+             CALL gpu_ZGEMM('C','N', l, l, kdim, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, p(1,(j-1)*sbsize + 1), kdimx, &
                                                                               C_ZERO, M(l+1, 2*l+1), sbsize3)
           end if
           call stop_clock('ppcg:zgemm')
+!$acc end host_data          
           !
         END IF
         !
         ! ... store the projected matrices
+!$acc update self(K, M)
         K_store(:, (j-1)*sbsize3 + 1 : j*sbsize3 ) = K
         M_store(:, (j-1)*sbsize3 + 1 : j*sbsize3 ) = M
+!!$acc parallel loop collapse(2)
+!        DO jj = 1, sbsize3
+!          DO ii = 1, sbsize3
+!            K_store(ii, (j-1)*sbsize3+jj) = K(ii,jj)
+!            M_store(ii, (j-1)*sbsize3+jj) = M(ii,jj)
+!          ENDDO
+!        ENDDO
         !
      END DO
      CALL mp_sum(K_store,inter_bgrp_comm)
@@ -499,6 +588,7 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
      !
      DO j = n_start, n_end
        !
+       !
        ! Get size of the sub-block and define indices of the corresponding columns
        IF ( j < nsb )  THEN
           l = sbsize
@@ -508,6 +598,13 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
 
        col_idx(1:l) = act_idx( (/ (i, i = (j-1)*sbsize + 1, (j-1)*sbsize + l) /)  )
        !
+!!$acc parallel loop collapse(2)
+!       DO jj = 1, sbsize3
+!         DO ii = 1, sbsize3
+!           K(ii,jj) = K_store(ii, (j-1)*sbsize3+jj)
+!           M(ii,JJ) = M_store(ii, (j-1)*sbsize3+jj)
+!         ENDDO
+!       ENDDO
        K = K_store(:, (j-1)*sbsize3 + 1 : j*sbsize3)
        M = M_store(:, (j-1)*sbsize3 + 1 : j*sbsize3)
        !
@@ -520,6 +617,8 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
        ELSE
           dimp = 2*l
        END IF
+       !
+!!!!$acc update self(K, M, K_store, M_store)
        !
        CALL ZHEGVD(1, 'V','U', dimp, K, sbsize3, M, sbsize3, D, cwork, lcwork, rwork, lrwork, iwork, liwork, info)
        IF (info /= 0) THEN
@@ -534,52 +633,108 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
           END IF
        END IF
        !
-       coord_psi(1 : l, 1 : l) = K(1 : l, 1 : l)
-       coord_w(1 : l, 1 : l) = K(l+1 : 2*l, 1 : l)
+!$acc update device(K, M)
+!!!!, K_store, M_store)       
+       !
+!$acc parallel loop collapse(2)
+       DO jj = 1, l
+         DO ii = 1, l
+           coord_psi(ii, jj) = K(ii, jj)
+           coord_w(ii,jj) = K(l+ii, jj)
+         ENDDO
+       ENDDO  
        !
        ! ... update the sub-block of P and AP
 !ev       IF ( MOD(iter, rr_step) /= 1 ) THEN
 !sdg      IF ( iter /= 1 ) THEN
+
        IF ( dimp == 3*l ) THEN
           !
-          coord_p(1 : l, 1 : l) = K(2*l+1 : 3*l, 1 : l)
-          !
+!$acc parallel loop collapse(2)
+          DO jj = 1, l
+            DO ii = 1, l
+              coord_p(ii, jj) = K(2*l+ii, jj)
+            ENDDO
+          ENDDO
+          !          
           call start_clock('ppcg:zgemm')
-          CALL ZGEMM('N','N', kdim, l, l, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
-          CALL ZGEMM('N','N', kdim, l, l, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
-          p(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l)
+!$acc host_data use_device(p, coord_p, buffer1, w, coord_w)
+          CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
+          CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2)
+          DO jj = 1, l 
+            DO ii = 1, kdimx
+              p(ii,(j-1)*sbsize + jj)  = buffer1(ii,jj)
+            ENDDO
+          ENDDO
           call stop_clock('ppcg:zgemm')
           !
           call start_clock('ppcg:zgemm')
-          CALL ZGEMM('N','N', kdim, l, l, C_ONE, hp(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
-          CALL ZGEMM('N','N', kdim, l, l, C_ONE, hw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
-          hp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l)
+!$acc host_data use_device(hp, coord_p, buffer1, hw, coord_w)
+          CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, hp(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
+          CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, hw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2)
+          DO jj = 1, l
+            DO ii = 1, kdimx
+              hp(ii,(j-1)*sbsize + jj)  = buffer1(ii,jj)
+            ENDDO
+          ENDDO
           call stop_clock('ppcg:zgemm')
           !
           if (overlap) then
              call start_clock('ppcg:zgemm')
-             CALL ZGEMM('N','N', kdim, l, l, C_ONE, sp(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
-             CALL ZGEMM('N','N', kdim, l, l, C_ONE, sw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
-             sp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l)
+!$acc host_data use_device(sp, coord_p, buffer1, sw, coord_w)
+             CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, sp(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
+             CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, sw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2) 
+             DO jj = 1, l
+               DO ii = 1, kdimx
+                 sp(ii,(j-1)*sbsize + jj)  = buffer1(ii,jj)
+               ENDDO
+             ENDDO
              call stop_clock('ppcg:zgemm')
           end if
           !
        ELSE
           !
           call start_clock('ppcg:zgemm')
-          CALL ZGEMM('N','N', kdim, l, l, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ZERO, buffer1, kdimx)
-          p(:,(j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:, 1:l)
+!$acc host_data use_device(w, coord_w, buffer1)
+          CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ZERO, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2)
+          DO jj = 1, l
+            DO ii = 1, kdimx
+              p(ii,(j-1)*sbsize + jj) = buffer1(ii, jj)
+            ENDDO
+          ENDDO
           call stop_clock('ppcg:zgemm')
           !
           call start_clock('ppcg:zgemm')
-          CALL ZGEMM('N','N', kdim, l, l, C_ONE, hw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ZERO, buffer1, kdimx)
-          hp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:, 1:l)
+!$acc host_data use_device(hw, coord_w, buffer1)
+          CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, hw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ZERO, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2)
+          DO jj = 1, l
+            DO ii = 1, kdimx
+              hp(ii,(j-1)*sbsize + jj) = buffer1(ii, jj)
+            ENDDO
+          ENDDO
           call stop_clock('ppcg:zgemm')
           !
           if (overlap) then
              call start_clock('ppcg:zgemm')
-             CALL ZGEMM('N','N', kdim, l, l, C_ONE, sw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, c_ZERO, buffer1, kdimx)
-             sp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:, 1:l)
+!$acc host_data use_device( buffer1, sw, coord_w)             
+             CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, sw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, c_ZERO, buffer1, kdimx)
+!$acc end host_data             
+!$acc parallel loop collapse(2) 
+             DO jj = 1, l
+               DO ii = 1, kdimx
+                 sp(ii,(j-1)*sbsize + jj) = buffer1(ii, jj)
+               ENDDO
+             ENDDO
              call stop_clock('ppcg:zgemm')
           end if
           !
@@ -587,19 +742,40 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
        !
        ! Update the sub-blocks of psi and hpsi (and spsi)
        call start_clock('ppcg:zgemm')
-       CALL ZGEMM('N','N', kdim, l, l, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
-       psi(:, (j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l) + p(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)
+!$acc host_data use_device( buffer1, coord_psi, psi)
+       CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2)
+       DO jj = 1, l
+         DO ii = 1, kdimx
+           psi(ii, (j-1)*sbsize + jj)  = buffer1(ii,jj) + p(ii,(j-1)*sbsize + jj)
+         ENDDO
+       ENDDO
        call stop_clock('ppcg:zgemm')
        !
        call start_clock('ppcg:zgemm')
-       CALL ZGEMM('N','N', kdim, l, l, C_ONE, hpsi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
-       hpsi(:, (j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l) + hp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)
+!$acc host_data use_device( hpsi, coord_psi, buffer1)       
+       CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, hpsi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2)
+       DO jj = 1, l
+         DO ii = 1, kdimx
+           hpsi(ii, (j-1)*sbsize + jj)  = buffer1(ii,jj) + hp(ii,(j-1)*sbsize + jj)
+         ENDDO
+       ENDDO
        call stop_clock('ppcg:zgemm')
        !
        if (overlap) then
           call start_clock('ppcg:zgemm')
-          CALL ZGEMM('N','N', kdim, l, l, C_ONE, spsi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
-          spsi(:, (j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:,1:l) + sp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)
+!$acc host_data use_device( spsi, coord_psi, buffer1)
+          CALL gpu_ZGEMM('N','N', kdim, l, l, C_ONE, spsi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
+!$acc end host_data
+!$acc parallel loop collapse(2) 
+          DO jj = 1, l
+            DO ii = 1, kdimx
+              spsi(ii, (j-1)*sbsize + jj) = buffer1(ii,jj) + sp(ii,(j-1)*sbsize + jj)
+            ENDDO
+          ENDDO
           call stop_clock('ppcg:zgemm')
        end if
        !
@@ -609,13 +785,19 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
      ! set to zero the columns not assigned to this bgrp, inactive colums are assigned to root_bgrp
      do j=1,nbnd
         if (idx(j)==0) then
-          psi (:,j) = C_ZERO 
-          hpsi (:,j) = C_ZERO 
-          p(:,j) = C_ZERO 
-          hp(:,j) = C_ZERO
+!$acc parallel loop
+          DO ii = 1, kdimx
+            psi (ii,j) = C_ZERO 
+            hpsi (ii,j) = C_ZERO 
+            p(ii,j) = C_ZERO 
+            hp(ii,j) = C_ZERO
+          ENDDO
           if(overlap) then 
-            spsi (:,j) = C_ZERO 
-            sp(:,j) = C_ZERO
+!$acc parallel loop 
+            DO ii = 1, kdimx
+              spsi (ii,j) = C_ZERO 
+              sp(ii,j) = C_ZERO
+            ENDDO
           end if 
         end if
      end do
@@ -648,11 +830,15 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
        end if
        !
        call start_clock('ppcg:RR')
+!$acc update self(psi, hpsi, e)       
        if(overlap) then 
+!$acc update self(spsi)               
          CALL extract_epairs_dmat(kdim, nbnd, kdimx, e, psi, hpsi, spsi )
+!$acc update device(spsi)
        else
          CALL extract_epairs_dmat(kdim, nbnd, kdimx, e, psi, hpsi )
        end if 
+!$acc update device(psi, hpsi, e)       
        call stop_clock('ppcg:RR')
        !
        IF (print_info >= 2) WRITE(stdout, *) 'RR has been invoked.' ; !CALL flush( stdout )
@@ -661,24 +847,27 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
        !     residuals for individual eigenpairs in psi and e
        nblock = (kdim-1) / blocksz + 1         ! used to optimize some omp parallel do loops
        if (overlap) then
-          !$omp parallel do collapse(2)
+!          !$omp parallel do collapse(2)
+!$acc parallel loop collapse(2)
           DO j = 1, nbnd ; DO i=1,nblock
              w( 1+(i-1)*blocksz:MIN(i*blocksz,kdim) ,j ) = hpsi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j ) &
                                                   - spsi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j )*e( j )
           END DO ; END DO
-          !$omp end parallel do
+!          !$omp end parallel do
        else
-          !$omp parallel do collapse(2)
+!          !$omp parallel do collapse(2)
+!$acc parallel loop collapse(2)
           DO j = 1, nbnd ; DO i=1,nblock
              w( 1+(i-1)*blocksz:MIN(i*blocksz,kdim) ,j ) = hpsi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j ) &
                                                           -  psi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j )*e( j )
           END DO ; END DO
-          !$omp end parallel do
+!          !$omp end parallel do
        end if
        !
        ! ... Lock converged eigenpairs (set up act_idx and nact)
        call start_clock('ppcg:lock')
-       nact_old = nact;
+       nact_old = nact;      
+!$acc update self(w)       
        CALL lock_epairs(kdim, nbnd, btype, w, kdimx, lock_tol, nact, act_idx)
        call stop_clock('ppcg:lock')
        !
@@ -696,12 +885,15 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
        end if 
        !
        ! ... Set up iteration parameters after locking
+!!!!$acc end data
        CALL setup_param
        !
+!!!!!$acc data create(K_store(sbsize3, sbsize3*nsb), M_store(sbsize3,sbsize3*nsb))       
        !
        trG1  =  0.D0
        trdif = -1.D0
-       trG   = SUM( e(act_idx(1:nact)) )
+!$acc update self(e)       
+       trG   = SUM( e (act_idx(1:nact)) )
        !
     ELSE
        !
@@ -709,8 +901,10 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
       ! ... orthogonalize psi and update hpsi accordingly
       IF ( .NOT. force_repmat ) THEN
          !
+!$acc update self(hpsi, psi, Gl)         
          call start_clock('ppcg:cholQR')
          if (overlap) then
+!$acc update self(spsi)                 
             CALL cholQR_dmat(kdim, nact, psi, spsi, kdimx, Gl, idesc)
          else
             CALL cholQR_dmat(kdim, nact, psi, psi, kdimx, Gl, idesc)
@@ -725,12 +919,16 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
             call start_clock('ppcg:ZTRSM')
             CALL zgemm_dmat( kdim, nact, kdimx, idesc, C_ONE, spsi, Gl, C_ZERO, spsi )
             call stop_clock('ppcg:ZTRSM')
+!$acc update device(spsi)
          end if
          !
+!$acc update device(hpsi, psi, Gl)         
       ELSE
          !
+!$acc update self(hpsi, psi, G)
          call start_clock('ppcg:cholQR')
          if (overlap) then
+!$acc update self(spsi) 
             CALL cholQR(kdim, nact, psi, spsi, kdimx, G, nbnd)
          else
             CALL cholQR(kdim, nact, psi, psi, kdimx, G, nbnd)
@@ -745,8 +943,10 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
             call start_clock('ppcg:ZTRSM')
             CALL ZTRSM('R', 'U', 'N', 'N', kdim, nact, C_ONE, G, nbnd, spsi, kdimx)
             call stop_clock('ppcg:ZTRSM')
+!$acc update device(spsi)            
          end if
          !
+!$acc update device(psi, hpsi, G)         
       END IF
 !! EV end
        !
@@ -754,10 +954,17 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
        !
        !  G = psi'hpsi
        call start_clock('ppcg:zgemm')
-       G = C_ZERO
+!$acc parallel loop collapse(2)
+       do jj =1, nact
+         do ii = 1, nact
+           G(ii,jj) = C_ZERO
+         enddo
+       enddo  
        CALL divide(inter_bgrp_comm,nact,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nact,n_start,n_end
+!$acc host_data use_device(psi, hpsi, G)       
        if (n_start .le. n_end) &
-       CALL ZGEMM('C','N', nact, my_n, kdim, C_ONE, psi, kdimx, hpsi(1,n_start), kdimx, C_ZERO, G(1,n_start), nbnd)
+       CALL gpu_ZGEMM('C','N', nact, my_n, kdim, C_ONE, psi, kdimx, hpsi(1,n_start), kdimx, C_ZERO, G(1,n_start), nbnd)
+!$acc end host_data
        CALL mp_sum(G(1:nact,1:nact), inter_bgrp_comm)
        CALL mp_sum(G(1:nact,1:nact), intra_bgrp_comm)
        call stop_clock('ppcg:zgemm')
@@ -765,22 +972,34 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
        ! w = hpsi - spsi*G
        call start_clock('ppcg:zgemm')
        IF ( my_bgrp_id /= root_bgrp_id ) then 
-         call threaded_memset( w, 0.d0, 2*kdimx*nact )
+!$acc host_data use_device(w)               
+         call gpu_threaded_memset( w, 0.d0, 2*kdimx*nact )
+!$acc end host_data
        ELSE
-         w(:,1:nact) = hpsi(:,1:nact)
+!$acc parallel loop collapse(2)
+         DO jj = 1, nact
+           DO ii = 1, kdimx  
+             w(ii, jj) = hpsi(ii, jj)
+           ENDDO
+         ENDDO  
        END IF 
        if (overlap) then
+!$acc host_data use_device(spsi, w, G)               
           if (n_start .le. n_end) &
-          CALL ZGEMM('N','N', kdim, nact, my_n, -C_ONE, spsi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, w, kdimx)
+          CALL gpu_ZGEMM('N','N', kdim, nact, my_n, -C_ONE, spsi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, w, kdimx)
+!$acc end host_data
        else
+!$acc host_data use_device(psi, w, G)               
           if (n_start .le. n_end) &
-          CALL ZGEMM('N','N', kdim, nact, my_n, -C_ONE, psi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, w, kdimx)
+          CALL gpu_ZGEMM('N','N', kdim, nact, my_n, -C_ONE, psi(1,n_start), kdimx, G(n_start,1), nbnd, C_ONE, w, kdimx)
+!$acc end host_data
        end if
        CALL mp_sum( w(:,1:nact), inter_bgrp_comm )
        call stop_clock('ppcg:zgemm')
        !
        ! ... Compute trace of the projected matrix on current iteration
        ! trG1  = get_trace( G(1:nact, 1:nact), nact )
+!$acc update self(G)       
        trG1  = get_trace( G, nbnd, nact )
        trdif = ABS(trG1 - trG)
        trG   = trG1
@@ -790,6 +1009,7 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
     ! Print iteration info ...
     IF (print_info >= 1) THEN
        WRITE(stdout, '("iter: ", I5, " nact = ", I5, ", trdif = ", 1pD9.2, ", trtol = ", 1pD9.2 )') iter, nact, trdif, trtol
+!$acc update self(w)       
        IF (print_info == 3) THEN
           res_array(iter) = print_rnrm( w, kdim, nbnd, kdimx)
           WRITE(stdout,'("Res. norm:  ", 1pD9.2)') res_array(iter)
@@ -801,7 +1021,7 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
     iter   = iter + 1
     !
     !
- END DO   !---End the main loop
+  END DO   !---End the main loop
  !
  ! unpack the (no-more-)active bands to the sparse order to compute eigenvalues and return the output psi
  CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
@@ -817,33 +1037,40 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
     CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1, -1) 
     if(overlap) then 
       CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+!$acc update self(psi, hpsi, spsi, e)      
       CALL extract_epairs_dmat(kdim, nbnd, kdimx, e, psi, hpsi, spsi )
+!$acc update device(psi, hpsi, spsi, e)
     else
+!$acc update self(psi, hpsi, e)            
       CALL extract_epairs_dmat(kdim, nbnd, kdimx, e, psi, hpsi )
+!$acc update device(psi, hpsi, e)
     end if 
     call stop_clock('ppcg:RR')
     !
     ! ... Compute residuals
     if (overlap) then
-       !$omp parallel do collapse(2)
+!       !$omp parallel do collapse(2)
+!$acc parallel loop collapse(2)
        DO j = 1, nbnd ; DO i=1,nblock
           w( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j ) = hpsi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j ) &
                                                - spsi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j )*e( j )
        END DO ; END DO
-       !$omp end parallel do
+!       !$omp end parallel do
     else
-       !$omp parallel do collapse(2)
+!       !$omp parallel do collapse(2)
+!$acc parallel loop collapse(2)
        DO j = 1, nbnd ; DO i=1,nblock
           w( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j ) = hpsi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j ) &
                                                -  psi( 1+(i-1)*blocksz:MIN(i*blocksz,kdim), j )*e( j )
        END DO ; END DO
-       !$omp end parallel do
+!       !$omp end parallel do
     end if
     !
     ! ... Get the number of converged eigenpairs and their indices
     !     Note: The tolerance is 10*lock_tol, i.e., weaker tham lock_tol
 ! E.V. notconv issue should be addressed
     call start_clock('ppcg:lock')
+!$acc update self(w)    
     CALL lock_epairs(kdim, nbnd, btype, w, kdimx, 10*lock_tol, nact, act_idx)
     call stop_clock('ppcg:lock')
     !
@@ -858,14 +1085,10 @@ SUBROUTINE ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, overlap, precondition, &
     FLUSH( stdout )
  END IF
  !
-!$acc end host_data
-!$acc end data 
-!$acc end host_data
-!$acc end data
-!$acc end host_data
 !$acc end data
 !$acc end data
-
+!$acc end data
+ !
  CALL deallocate_all
  !
  CALL stop_clock( 'ppcg_k' )
@@ -1104,34 +1327,25 @@ CONTAINS
      !
      INTEGER         :: j
      REAL(DP)        :: rnrm_store(nbnd), band_tollerance 
-     REAL(DP), EXTERNAL :: gpu_DDOT
+     REAL(DP), EXTERNAL :: DDOT
 
      !
      nact = 0
      ! ... Compute norms of each column of psi
      rnrm_store = 0.D0
 
-!$acc data create( rnrm_store(nbnd))
-!$acc host_data use_device(rnrm_store)
-
-
      CALL divide(inter_bgrp_comm,nbnd,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nbnd,n_start,n_end
+
      DO j = n_start, n_end
         !
-        rnrm_store(j)   =  gpu_DDOT(2*kdim, w(:,j), 1, w(:,j), 1)
+        rnrm_store(j)   =  DDOT(2*kdim, w(:,j), 1, w(:,j), 1)
         !
      END DO
+
      CALL mp_sum( rnrm_store, inter_bgrp_comm )
      !
      CALL mp_sum( rnrm_store, intra_bgrp_comm )
      !
-!$acc parallel loop
-     DO j = 1, nbnd
-        !
-        rnrm_store(j) = SQRT( rnrm_store(j) )
-        !
-     ENDDO
-
      DO j = 1, nbnd
         !
         if ( btype(j) == 0 ) then
@@ -1140,7 +1354,7 @@ CONTAINS
              band_tollerance = tol
         end if
         !
-!        rnrm_store(j) = SQRT( rnrm_store(j) )
+        rnrm_store(j) = SQRT( rnrm_store(j) )
         !
         IF ( (print_info >= 2) .AND. (iter > 1) )  THEN
           write(stdout, '( "Eigenvalue ", I5, " = ", 1pe12.4, ". Residual norm = ",  1pe9.2)') &
@@ -1154,8 +1368,6 @@ CONTAINS
         !
      END DO
      !
-!$acc end host_data
-!$acc end data     
      !
   END SUBROUTINE lock_epairs
   !

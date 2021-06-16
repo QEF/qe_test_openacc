@@ -643,8 +643,8 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
              avg_iter = avg_iter + cg_iter
              !
           ELSE IF ( isolve == 2) then
+             CALL using_evc(1); CALL using_et(1); CALL using_h_diag(0)     
              IF ( .not. use_gpu ) THEN
-               CALL using_evc(1); CALL using_et(1); CALL using_h_diag(0)
                ! BEWARE npol should be added to the arguments
 !civn 
 !              CALL ppcg_k( h_psi, s_psi, okvan, h_diag, &
@@ -657,19 +657,10 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
                !
              ELSE
 !obas                     
-!               CALL using_evc_d(1); CALL using_et_d(1); CALL using_h_diag_d(0)
                ! BEWARE npol should be added to the arguments
-!               CALL ppcg_k_gpu( h_psi_gpu, s_psi_gpu, okvan, h_diag_d, &
-!                           npwx, npw, nbnd, npol, evc_d, et_d(1,ik), btype(1,ik), &
-!                           0.1d0*ethr, max_ppcg_iter, notconv, ppcg_iter, sbsize , rrstep, iter )
-
-!$acc data copy(evc(:,:), et(:,:))
-!$acc host_data use_device(evc, et)
-               CALL ppcg_k_idx_acc( h_psi, s_psi, okvan, h_diag, &
+               CALL ppcg_k_idx_acc( h_psi_gpu, s_psi_gpu, okvan, h_diag, &
                            npwx, npw, nbnd, npol, evc, et(1,ik), btype(1,ik), &
                            0.1d0*ethr, max_ppcg_iter, notconv, ppcg_iter, sbsize , rrstep, iter )
-!$acc end host_data
-!$acc end data
                !
                avg_iter = avg_iter + ppcg_iter
                !

@@ -47,7 +47,9 @@ CG/rcgdiagg_gpu.o \
 CG/ccgdiagg_gpu.o \
 PPCG/generic_cublas.o \
 PPCG/ppcg_gamma_gpu.o \
+PPCG/ppcg_gamma_idx_acc.o \
 PPCG/ppcg_k_gpu.o \
+PPCG/ppcg_k_idx_acc.o \
 ParO/bpcg_gamma_gpu.o \
 ParO/bpcg_gamma_acc.o \
 ParO/bpcg_k_gpu.o \

@@ -669,8 +669,8 @@ END SUBROUTINE reorder_evals_revecs
 !
 !----------------------------------------------------------------------------
 SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &  
-                    npw, npwx, nvec, nvecx, evc_d, ethr, &
-                    e_d, btype, notcnv, lrot, dav_iter, nhpsi )
+                        npw, npwx, nvec, nvecx, evc_d, ethr, &
+                        e_d, btype, notcnv, lrot, dav_iter, nhpsi )
   !----------------------------------------------------------------------------
   !
   ! ... iterative solution of the eigenvalue problem:
@@ -685,7 +685,8 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   USE mp_bands_util,     ONLY : intra_bgrp_comm, inter_bgrp_comm, root_bgrp_id, nbgrp, my_bgrp_id
   USE mp_bands_util,     ONLY : gstart
   USE mp,                ONLY : mp_bcast, mp_root_sum, mp_sum
-  USE device_fbuff_m,  ONLY : buffer => dev_buf
+  USE device_fbuff_m,    ONLY : buffer => dev_buf
+  USE device_memcpy_m,   ONLY : dev_memcpy, dev_memset
   !
   IMPLICIT NONE
   !
@@ -724,7 +725,6 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
   ! ... LOCAL variables
   !
-  COMPLEX(DP), ALLOCATABLE :: evc(:,:)
   REAL(DP), ALLOCATABLE :: e(:)
   
   INTEGER, PARAMETER :: maxter = 20
@@ -746,7 +746,7 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
     ! S matrix on the reduced basis
     ! eigenvectors of the Hamiltonian
     ! eigenvalues of the reduced hamiltonian
-  COMPLEX(DP), ALLOCATABLE :: psi(:,:), hpsi(:,:), spsi(:,:)
+  COMPLEX(DP), ALLOCATABLE :: psi(:,:) ! optimize here for gpu
   COMPLEX(DP), POINTER :: psi_d(:,:), hpsi_d(:,:), spsi_d(:,:)
 #if defined(__CUDA)
   attributes(DEVICE) :: psi_d, hpsi_d, spsi_d
@@ -775,6 +775,7 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   LOGICAL :: do_distr_diag_inside_bgrp
   !
   REAL(DP), EXTERNAL :: ddot
+  REAL(DP), EXTERNAL :: KSddot
   !
   EXTERNAL  h_psi_gpu, s_psi_gpu, g_psi_gpu
     ! h_psi(npwx,npw,nvec,psi,hpsi)
@@ -790,7 +791,7 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
   !
   CALL start_clock( 'regterg' )
-  ! 
+  !
   CALL laxlib_getval( np_ortho = np_ortho, ortho_parent_comm = ortho_parent_comm, &
     do_distr_diag_inside_bgrp = do_distr_diag_inside_bgrp )
   ! 
@@ -802,10 +803,6 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
   empty_ethr = MAX( ( ethr * 5.D0 ), 1.D-5 )
   !
-  ALLOCATE(  evc( npwx, nvec ), STAT=ierr )
-  IF( ierr /= 0 ) &
-     CALL errore( ' pregterg ',' cannot allocate evc (host) ', ABS(ierr) )
-  !
   ALLOCATE(  e( nvec ), STAT=ierr )
   IF( ierr /= 0 ) &
      CALL errore( ' pregterg ',' cannot allocate e (host) ', ABS(ierr) )
@@ -814,16 +811,6 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   ALLOCATE( psi(  npwx, nvecx ), STAT=ierr )
   IF( ierr /= 0 ) &
      CALL errore( 'pregterg ',' cannot allocate psi ', ABS(ierr) )
-  !
-  ALLOCATE( hpsi( npwx, nvecx ), STAT=ierr )
-  IF( ierr /= 0 ) &
-     CALL errore( 'pregterg ',' cannot allocate hpsi ', ABS(ierr) )
-  !
-  IF ( uspp ) THEN
-     ALLOCATE( spsi( npwx, nvecx ), STAT=ierr )
-     IF( ierr /= 0 ) &
-        CALL errore( 'pregterg ',' cannot allocate spsi ', ABS(ierr) )
-  END IF
   !
   ! ... Initialize the matrix descriptor
   !
@@ -896,20 +883,11 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   nbase  = nvec
   conv   = .FALSE.
   !
-  IF ( uspp ) spsi = ZERO
-  !
-  hpsi = ZERO
   psi  = ZERO
   CALL buffer%lock_buffer(psi_d, (/npwx, nvecx/), info)  
   CALL buffer%lock_buffer(hpsi_d, (/npwx, nvecx/), info)  
   CALL buffer%lock_buffer(spsi_d, (/npwx, nvecx/), info)  
   CALL buffer%lock_buffer(ew_d, nvecx, info)
-
-  
-  evc(:,1:nvec) = evc_d(:,1:nvec)
-  psi(:,1:nvec) = evc(:,1:nvec)
-  ! ... set Im[ psi(G=0) ] -  needed for numerical stability
-  IF ( gstart == 2 ) psi(1,1:nvec) = CMPLX( DBLE( psi(1,1:nvec) ), 0.D0 ,kind=DP)
 
   !$cuf kernel do(2) <<<*,*>>>
   do k=1,nvec
@@ -922,11 +900,9 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
   ! ... hpsi contains h times the basis vectors
   !
-  CALL h_psi_gpu( npwx, npw, nvec, psi_d, hpsi_d )  ; nhpsi = nvec
-  hpsi = hpsi_d
+  CALL h_psi_gpu( npwx, npw, nvec, psi_d, hpsi_d ) ; nhpsi = nvec
   !
   IF ( uspp ) CALL s_psi_gpu( npwx, npw, nvec, psi_d, spsi_d )
-  IF ( uspp ) spsi = spsi_d
   !
   ! ... hl contains the projection of the hamiltonian onto the reduced
   ! ... space, vl contains the eigenvectors of hl. Remember hl, vl and sl
@@ -935,17 +911,18 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
   CALL start_clock( 'regterg:init' )
 
-  CALL compute_distmat( hl, psi, hpsi )
+  CALL compute_distmat_gpu( hl, psi_d, hpsi_d )
   !
   IF ( uspp ) THEN
      !
-     CALL compute_distmat( sl, psi, spsi )
+     CALL compute_distmat_gpu( sl, psi_d, spsi_d )
      !
   ELSE
      !
-     CALL compute_distmat( sl, psi, psi )
+     CALL compute_distmat_gpu( sl, psi_d, psi_d )
      !
   END IF
+
   CALL stop_clock( 'regterg:init' )
   !
   IF ( lrot ) THEN
@@ -992,16 +969,14 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
      ! ... expand the basis set with new basis vectors ( H - e*S )|psi> ...
      !
-     CALL hpsi_dot_v()
+     ew_d = ew ! NB: ew_d is needed by hpsi_dot_v_gpu
+     CALL hpsi_dot_v_gpu()
      !
      CALL stop_clock( 'regterg:update' )
      !
      ! ... approximate inverse iteration
      !
-     ew_d = ew
-     psi_d = psi
      CALL g_psi_gpu( npwx, npw, notcnv, 1, psi_d(1,nb1), ew_d(nb1) )
-     psi = psi_d
      !
      ! ... "normalize" correction vectors psi(:,nb1:nbase+notcnv) in 
      ! ... order to improve numerical stability of subspace diagonalization 
@@ -1009,15 +984,21 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
      ! ...         ew = <psi_i|psi_i>,  i = nbase + 1, nbase + notcnv
      !
+     ! optimize for GPU ...
+     psi = psi_d ! CHANGE
      DO n = 1, notcnv
         !
         ew(n) = 2.D0 * ddot( npw2, psi(1,nbase+n), 1, psi(1,nbase+n), 1 )
+        !ew(n) = 2.D0 * KSDdot( npw2, psi_d(1,nbase+n), 1, psi_d(1,nbase+n), 1 )
         !
         IF ( gstart == 2 ) ew(n) = ew(n) - psi(1,nbase+n) * psi(1,nbase+n)
+        !IF ( gstart == 2 ) ew(n) = ew(n) - psi_d(1,nbase+n) * psi_d(1,nbase+n)
         !
      END DO
      !
      CALL mp_sum( ew( 1:notcnv ), intra_bgrp_comm )
+     !
+     !ew_d(1:notcnv) = ew(1:notcnv)
      !
      DO n = 1, notcnv
         !
@@ -1029,12 +1010,13 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
      ! ... here compute the hpsi and spsi of the new functions
      !
-     psi_d = psi
+     psi_d = psi ! TOCHANGE
+     ew_d = ew !TOCHANGE
+     ! ... end optimize for GPU
+
      CALL h_psi_gpu( npwx, npw, notcnv, psi_d(1,nb1), hpsi_d(1,nb1) ) ; nhpsi = nhpsi + notcnv
-     hpsi = hpsi_d
      !
      IF ( uspp ) CALL s_psi_gpu( npwx, npw, notcnv, psi_d(1,nb1), spsi_d(1,nb1) )
-     IF ( uspp ) spsi = spsi_d
      !
      ! ... update the reduced hamiltonian
      !
@@ -1046,7 +1028,7 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
      ! ... RE-Initialize the matrix descriptor
      !
-     CALL desc_init( nbase+notcnv, nx, la_proc, idesc, rank_ip, irc_ip, nrc_ip  )
+     CALL desc_init( nbase+notcnv, nx, la_proc, idesc, rank_ip, irc_ip, nrc_ip )
      !
      IF( la_proc ) THEN
 
@@ -1076,15 +1058,15 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      END IF
      !
      !
-     CALL update_distmat( hl, psi, hpsi )
+     CALL update_distmat_gpu( hl, psi_d, hpsi_d )
      !
      IF ( uspp ) THEN
         !
-        CALL update_distmat( sl, psi, spsi )
+        CALL update_distmat_gpu( sl, psi_d, spsi_d )
         !
      ELSE
         !
-        CALL update_distmat( sl, psi, psi )
+        CALL update_distmat_gpu( sl, psi_d, psi_d )
         !
      END IF
      !
@@ -1099,7 +1081,7 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      IF ( do_distr_diag_inside_bgrp ) THEN ! NB on output of pdiaghg ew and vl are the same across ortho_parent_comm
         ! only the first bgrp performs the diagonalization
         IF( my_bgrp_id == root_bgrp_id ) CALL pdiaghg( nbase, hl, sl, nx, ew, vl, idesc )
-        IF( nbgrp > 1 ) THEN ! results must be brodcast to the other bnd groups
+        IF( nbgrp > 1 ) THEN ! results must be brodcast to the other band groups
            CALL mp_bcast( vl, root_bgrp_id, inter_bgrp_comm )
            CALL mp_bcast( ew, root_bgrp_id, inter_bgrp_comm )
         ENDIF
@@ -1126,6 +1108,7 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
      e(1:nvec) = ew(1:nvec)
      e_d(1:nvec) = e(1:nvec)
+     ew_d = ew
      !
      ! ... if overall convergence has been achieved, or the dimension of
      ! ... the reduced basis set is becoming too large, or in any case if
@@ -1137,8 +1120,7 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
         !
         CALL start_clock( 'regterg:last' )
         !
-        CALL refresh_evc()
-        evc_d = evc
+        CALL refresh_evc_gpu()
         !
         IF ( notcnv == 0 ) THEN
            !
@@ -1152,9 +1134,6 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
            !
            ! ... last iteration, some roots not converged: return
            !
-           !!!WRITE( stdout, '(5X,"WARNING: ",I5, &
-           !!!     &   " eigenvalues not converged in regterg")' ) notcnv
-           !
            CALL stop_clock( 'regterg:last' )
            !
            EXIT iterate
@@ -1163,21 +1142,21 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
         !
         ! ... refresh psi, H*psi and S*psi
         !
-        psi(:,1:nvec) = evc(:,1:nvec)
+        CALL dev_memcpy(psi_d, evc_d, (/1, npwx /), 1 , (/ 1, nvec /), 1) ! need if refresh_evc_gpu
         !
         IF ( uspp ) THEN
            !
-           CALL refresh_spsi()
+           CALL refresh_spsi_gpu()
            ! 
         END IF
         !
-        CALL refresh_hpsi()
+        CALL refresh_hpsi_gpu()
         !
         ! ... refresh the reduced hamiltonian
         !
         nbase = nvec
         !
-        CALL desc_init( nvec, nx, la_proc, idesc, rank_ip, irc_ip, nrc_ip  )
+        CALL desc_init( nvec, nx, la_proc, idesc, rank_ip, irc_ip, nrc_ip )
         !
         IF( la_proc ) THEN
            !
@@ -1217,7 +1196,6 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   DEALLOCATE( notcnv_ip )
   DEALLOCATE( conv )
   DEALLOCATE( ew )
-  DEALLOCATE( evc )
   DEALLOCATE( e )
   
   CALL buffer%release_buffer(psi_d, info)  
@@ -1225,9 +1203,6 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   CALL buffer%release_buffer(spsi_d, info)  
   CALL buffer%release_buffer(ew_d, info)  
   !
-  IF ( uspp ) DEALLOCATE( spsi )
-  !
-  DEALLOCATE( hpsi )
   DEALLOCATE( psi )  
   !
   CALL stop_clock( 'regterg' )
@@ -1319,23 +1294,34 @@ CONTAINS
   END SUBROUTINE reorder_v
   !
   !
-  SUBROUTINE hpsi_dot_v()
+  SUBROUTINE hpsi_dot_v_gpu()
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
      !
      INTEGER :: ipc, ipr
      INTEGER :: nr, nc, ir, ic, notcl, root, np
      REAL(DP), ALLOCATABLE :: vtmp( :, : )
-     COMPLEX(DP), ALLOCATABLE :: ptmp( :, : )
      REAL(DP) :: beta
+     !
+     REAL(DP), ALLOCATABLE :: vtmp_d( :, : )
+     COMPLEX(DP), ALLOCATABLE :: ptmp_d( :, : ) ! check this
+#if defined(__CUDA)
+     attributes(DEVICE) :: vtmp_d, ptmp_d
+#endif
+     !
+     ALLOCATE( vtmp_d( nx, nx ) )
+     ALLOCATE( ptmp_d( npwx, nx ) )
 
      ALLOCATE( vtmp( nx, nx ) )
-     ALLOCATE( ptmp( npwx, nx ) )
 
      DO ipc = 1, idesc(LAX_DESC_NPC)
         !
         IF( notcnv_ip( ipc ) > 0 ) THEN
 
            notcl = notcnv_ip( ipc )
-           ic    = ic_notcnv( ipc ) 
+           ic    = ic_notcnv( ipc )
 
            beta = 0.0d0
 
@@ -1351,50 +1337,66 @@ CONTAINS
               END IF
 
               CALL mp_bcast( vtmp(:,1:notcl), root, ortho_parent_comm )
-              ! 
+              !
+              vtmp_d(:,1:notcl) = vtmp(:,1:notcl)
+              !
               IF ( uspp ) THEN
                  !
                  CALL DGEMM( 'N', 'N', npw2, notcl, nr, 1.D0, &
-                    spsi( 1, ir ), npwx2, vtmp, nx, beta, psi(1,nb1+ic-1), npwx2 )
+                    spsi_d( 1, ir ), npwx2, vtmp_d, nx, beta, psi_d(1,nb1+ic-1), npwx2 )
                  !
               ELSE
                  !
                  CALL DGEMM( 'N', 'N', npw2, notcl, nr, 1.D0, &
-                    psi( 1, ir ), npwx2, vtmp, nx, beta, psi(1,nb1+ic-1), npwx2 )
+                    psi_d( 1, ir ), npwx2, vtmp_d, nx, beta, psi_d(1,nb1+ic-1), npwx2 )
                  !
               END IF
               !
               CALL DGEMM( 'N', 'N', npw2, notcl, nr, 1.D0, &
-                      hpsi( 1, ir ), npwx2, vtmp, nx, beta, ptmp, npwx2 )
+                      hpsi_d( 1, ir ), npwx2, vtmp_d, nx, beta, ptmp_d, npwx2 )
 
               beta = 1.0d0
 
            END DO
-
+           !
+           !$cuf kernel do(2) <<<*,*>>>
            DO np = 1, notcl
-              !
-              psi(1:npw,nbase+np+ic-1) = ptmp(1:npw,np) - ew(nbase+np+ic-1) * psi(1:npw,nbase+np+ic-1)
-              !
+              DO k = 1, npw
+                 psi_d(k,nbase+np+ic-1) = ptmp_d(k,np) - ew_d(nbase+np+ic-1) * psi_d(k,nbase+np+ic-1)
+              END DO
            END DO
            !
         END IF
         !
      END DO
 
-     
      DEALLOCATE( vtmp )
-     DEALLOCATE( ptmp )
+
+     DEALLOCATE( vtmp_d )
+     DEALLOCATE( ptmp_d )
 
      RETURN
-  END SUBROUTINE hpsi_dot_v
+  END SUBROUTINE hpsi_dot_v_gpu
   !
   !
-  SUBROUTINE refresh_evc( )
+  SUBROUTINE refresh_evc_gpu( )
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
      !
      INTEGER :: ipc, ipr
      INTEGER :: nr, nc, ir, ic, root
      REAL(DP), ALLOCATABLE :: vtmp( :, : )
      REAL(DP) :: beta
+     !
+     REAL(DP), ALLOCATABLE :: work_d( :, : )
+#if defined(__CUDA)
+     attributes(DEVICE) :: work_d
+#endif
+     !
+     ALLOCATE( work_d( nx, nx ) )
+     work_d = 0.0D0
 
      ALLOCATE( vtmp( nx, nx ) )
      !
@@ -1419,22 +1421,29 @@ CONTAINS
               IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
                  !
                  !  this proc sends his block
-                 ! 
+                 !
                  CALL mp_bcast( vl(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d(:,1:nc) = vl(:,1:nc)
+                 !
                  CALL DGEMM( 'N', 'N', npw2, nc, nr, 1.D0, &
-                          psi(1,ir), npwx2, vl, nx, beta, evc(1,ic), npwx2 )
+                          psi_d(1,ir), npwx2, work_d, nx, beta, evc_d(1,ic), npwx2 )
+                 !
               ELSE
                  !
                  !  all other procs receive
-                 ! 
+                 !
                  CALL mp_bcast( vtmp(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d(:,1:nc) = vtmp(:,1:nc)
+                 !
                  CALL DGEMM( 'N', 'N', npw2, nc, nr, 1.D0, &
-                          psi(1,ir), npwx2, vtmp, nx, beta, evc(1,ic), npwx2 )
+                          psi_d(1,ir), npwx2, work_d, nx, beta, evc_d(1,ic), npwx2 )
+                 !
               END IF
-              ! 
-
+              !
               beta = 1.0d0
-
+              !
            END DO
            !
         END IF
@@ -1442,17 +1451,31 @@ CONTAINS
      END DO
      !
      DEALLOCATE( vtmp )
-
+     !
+     DEALLOCATE( work_d )
+     !
      RETURN
-  END SUBROUTINE refresh_evc
+  END SUBROUTINE refresh_evc_gpu
   !
   !
-  SUBROUTINE refresh_spsi( )
+  SUBROUTINE refresh_spsi_gpu( )
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
      !
      INTEGER :: ipc, ipr
      INTEGER :: nr, nc, ir, ic, root
      REAL(DP), ALLOCATABLE :: vtmp( :, : )
      REAL(DP) :: beta
+     !
+     REAL(DP), ALLOCATABLE :: work_d( :, : )
+#if defined(__CUDA)
+     attributes(DEVICE) :: work_d
+#endif
+     !
+     ALLOCATE( work_d( nx, nx ) )
+     work_d = 0.d0
 
      ALLOCATE( vtmp( nx, nx ) )
      !
@@ -1477,43 +1500,69 @@ CONTAINS
               IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
                  !
                  !  this proc sends his block
-                 ! 
+                 !
                  CALL mp_bcast( vl(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d(:,1:nc) = vl(:,1:nc)
+                 !
                  CALL DGEMM( 'N', 'N', npw2, nc, nr, 1.D0, &
-                          spsi(1,ir), npwx2, vl, nx, beta, psi(1,nvec+ic), npwx2 )
+                          spsi_d(1,ir), npwx2, work_d, nx, beta, psi_d(1,nvec+ic), npwx2 )
+                 !
               ELSE
                  !
                  !  all other procs receive
-                 ! 
+                 !
                  CALL mp_bcast( vtmp(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d(:,1:nc) = vtmp(:,1:nc)
+                 !
                  CALL DGEMM( 'N', 'N', npw2, nc, nr, 1.D0, &
-                          spsi(1,ir), npwx2, vtmp, nx, beta, psi(1,nvec+ic), npwx2 )
+                          spsi_d(1,ir), npwx2, work_d, nx, beta, psi_d(1,nvec+ic), npwx2 )
+                 !
               END IF
-              ! 
+              !
               beta = 1_DP
-
+              !
            END DO
            !
         END IF
         !
      END DO
      !
-     spsi(:,1:nvec) = psi(:,nvec+1:nvec+nvec)
+     !$cuf kernel do(2) <<<*,*>>>
+     DO j = 1, nvec
+        DO i = 1, npwx
+           spsi_d(i,j) = psi_d(i,nvec+j)
+        END DO
+     END DO
      !
      DEALLOCATE( vtmp )
-
+     !
+     DEALLOCATE( work_d )
+     !
      RETURN
-  END SUBROUTINE refresh_spsi
+  END SUBROUTINE refresh_spsi_gpu
   !
   !
-  !
-  SUBROUTINE refresh_hpsi( )
+  SUBROUTINE refresh_hpsi_gpu( )
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
      !
      INTEGER :: ipc, ipr
      INTEGER :: nr, nc, ir, ic, root
      REAL(DP), ALLOCATABLE :: vtmp( :, : )
      REAL(DP) :: beta
-
+     !
+     REAL(DP), ALLOCATABLE :: work_d( :, : )
+#if defined(__CUDA)
+     attributes(DEVICE) :: work_d
+#endif
+     !
+     ALLOCATE( work_d( nx, nx ) )
+     work_d = 0.d0
+     !
      ALLOCATE( vtmp( nx, nx ) )
      !
      DO ipc = 1, idesc(LAX_DESC_NPC)
@@ -1537,21 +1586,29 @@ CONTAINS
               IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
                  !
                  !  this proc sends his block
-                 ! 
+                 !
                  CALL mp_bcast( vl(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d(:,1:nc) = vl(:,1:nc)
+                 !
                  CALL DGEMM( 'N', 'N', npw2, nc, nr, 1.D0, &
-                          hpsi(1,ir), npwx2, vl, nx, beta, psi(1,nvec+ic), npwx2 )
+                          hpsi_d(1,ir), npwx2, work_d, nx, beta, psi_d(1,nvec+ic), npwx2 )
+                 !
               ELSE
                  !
                  !  all other procs receive
-                 ! 
+                 !
                  CALL mp_bcast( vtmp(:,1:nc), root, ortho_parent_comm )
+                 !
+                 work_d(:,1:nc) = vtmp(:,1:nc)
+                 !
                  CALL DGEMM( 'N', 'N', npw2, nc, nr, 1.D0, &
-                          hpsi(1,ir), npwx2, vtmp, nx, beta, psi(1,nvec+ic), npwx2 )
+                          hpsi_d(1,ir), npwx2, work_d, nx, beta, psi_d(1,nvec+ic), npwx2 )
+                 !
               END IF
-              ! 
+              !
               beta = 1.0d0
-
+              !
            END DO
            !
         END IF
@@ -1559,30 +1616,49 @@ CONTAINS
      END DO
      !
      DEALLOCATE( vtmp )
+     !
+     !$cuf kernel do(2) <<<*,*>>>
+     DO j = 1, nvec
+        DO i = 1, npwx
+           hpsi_d(i,j) = psi_d(i,nvec+j)
+        END DO
+     END DO
 
-     hpsi(:,1:nvec) = psi(:,nvec+1:nvec+nvec)
-
+     !
+     DEALLOCATE( work_d )
+     !
      RETURN
-  END SUBROUTINE refresh_hpsi
+  END SUBROUTINE refresh_hpsi_gpu
   !
   !
-
-  SUBROUTINE compute_distmat( dm, v, w )
+  SUBROUTINE compute_distmat_gpu( dm, v, w )
      !
      !  This subroutine compute <vi|wj> and store the
-     !  result in distributed matrix dm 
+     !  result in distributed matrix dm
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
      !
      INTEGER :: ipc, ipr
      INTEGER :: nr, nc, ir, ic, root
      REAL(DP), INTENT(OUT) :: dm( :, : )
-     COMPLEX(DP) :: v(:,:), w(:,:)
+     COMPLEX(DP), INTENT(IN) :: v(:,:), w(:,:)
      REAL(DP), ALLOCATABLE :: work( :, : )
+     !
+     REAL(DP), ALLOCATABLE :: work_d( :, : )
+#if defined(__CUDA)
+     attributes(DEVICE) :: v, w, work_d
+#endif
+     !
+     ALLOCATE( work_d( nx, nx ) )
+     work_d = 0.0d0
      !
      ALLOCATE( work( nx, nx ) )
      !
      work = 0.0d0
      !
-     DO ipc = 1, idesc(LAX_DESC_NPC) !  loop on column procs 
+     DO ipc = 1, idesc(LAX_DESC_NPC) !  loop on column procs
         !
         nc = nrc_ip( ipc )
         ic = irc_ip( ipc )
@@ -1599,10 +1675,12 @@ CONTAINS
            ! use blas subs. on the matrix block
 
            CALL DGEMM( 'T', 'N', nr, nc, npw2, 2.D0 , &
-                       v(1,ir), npwx2, w(1,ic), npwx2, 0.D0, work, nx )
+                       v(1,ir), npwx2, w(1,ic), npwx2, 0.D0, work_d, nx )
 
            IF ( gstart == 2 ) &
-              CALL DGER( nr, nc, -1.D0, v(1,ir), npwx2, w(1,ic), npwx2, work, nx )
+              CALL KScudaDGER( nr, nc, -1.D0, v(1,ir), npwx2, w(1,ic), npwx2, work_d, nx )
+
+           work = work_d
 
            ! accumulate result on dm of root proc.
 
@@ -1617,18 +1695,32 @@ CONTAINS
      !
      DEALLOCATE( work )
      !
+     DEALLOCATE( work_d )
+     !
      RETURN
-  END SUBROUTINE compute_distmat
+  END SUBROUTINE compute_distmat_gpu
   !
   !
-  SUBROUTINE update_distmat( dm, v, w )
+  SUBROUTINE update_distmat_gpu( dm, v, w )
+     !
+#if defined(__CUDA)
+     use cublas
+#endif
      !
      INTEGER :: ipc, ipr
      INTEGER :: nr, nc, ir, ic, root, icc, ii
      REAL(DP)    :: dm( :, : )
-     COMPLEX(DP) :: v(:,:), w(:,:)
+     COMPLEX(DP), INTENT(IN) :: v(:,:), w(:,:)
      REAL(DP), ALLOCATABLE :: vtmp( :, : )
-
+     !
+     REAL(DP), ALLOCATABLE :: work_d( :, : )
+#if defined(__CUDA)
+     attributes(DEVICE) :: v, w, work_d
+#endif
+     !
+     ALLOCATE( work_d( nx, nx ) )
+     work_d = 0.0d0
+     !
      ALLOCATE( vtmp( nx, nx ) )
      !
      vtmp = 0.0d0
@@ -1657,19 +1749,21 @@ CONTAINS
               root = rank_ip( ipr, ipc )
 
               CALL DGEMM( 'T', 'N', nr, nc, npw2, 2.D0, v( 1, ir ), &
-                          npwx2, w(1,ii), npwx2, 0.D0, vtmp, nx )
+                          npwx2, w(1,ii), npwx2, 0.D0, work_d, nx )
               !
               IF ( gstart == 2 ) &
-                 CALL DGER( nr, nc, -1.D0, v( 1, ir ), npwx2, w(1,ii), npwx2, vtmp, nx )
+                 CALL KScudaDGER( nr, nc, -1.D0, v( 1, ir ), npwx2, w(1,ii), npwx2, work_d, nx )
+              !
+              vtmp(:,1:nc) = work_d(:,1:nc)
+              !
               IF (ortho_parent_comm.ne.intra_bgrp_comm .and. nbgrp > 1) vtmp = vtmp/nbgrp
-
+              !
               IF(  (idesc(LAX_DESC_ACTIVE_NODE) > 0) .AND. &
                    (ipr-1 == idesc(LAX_DESC_MYR)) .AND. (ipc-1 == idesc(LAX_DESC_MYC)) ) THEN
                  CALL mp_root_sum( vtmp(:,1:nc), dm(:,icc:icc+nc-1), root, ortho_parent_comm )
               ELSE
                  CALL mp_root_sum( vtmp(:,1:nc), dm, root, ortho_parent_comm )
               END IF
-
 
            END DO
            !
@@ -1680,9 +1774,9 @@ CONTAINS
      CALL laxlib_dsqmsym( nbase+notcnv, dm, nx, idesc )
      !
      DEALLOCATE( vtmp )
+     DEALLOCATE( work_d )
      RETURN
-  END SUBROUTINE update_distmat
-  !
+  END SUBROUTINE update_distmat_gpu
   !
   !
   SUBROUTINE set_e_from_h()

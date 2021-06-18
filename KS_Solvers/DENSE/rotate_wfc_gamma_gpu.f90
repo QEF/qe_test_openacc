@@ -5,8 +5,6 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
-#define ZERO ( 0.D0, 0.D0 )
-#define ONE  ( 1.D0, 0.D0 )
 !
 !----------------------------------------------------------------------------
 SUBROUTINE rotate_wfc_gamma_gpu( h_psi_gpu, s_psi_gpu, overlap, &
@@ -370,14 +368,14 @@ CONTAINS
      COMPLEX(DP) :: v(:,:), w(:,:)
      REAL(DP), ALLOCATABLE :: work( :, : )
      !
-     COMPLEX(DP), ALLOCATABLE :: work_d(:,:)
+     REAL(DP), ALLOCATABLE :: work_d(:,:)
 #if defined(__CUDA)
      attributes(DEVICE) :: v, w, work_d
 #endif
      !
      ALLOCATE( work_d( nx, nx ) )
      !
-     work_d = ZERO
+     work_d = 0.0d0
      !
      ALLOCATE( work( nx, nx ) )
      !
@@ -435,14 +433,14 @@ CONTAINS
      REAL(DP), ALLOCATABLE :: vtmp( :, : )
      REAL(DP) :: beta
      !
-     COMPLEX(DP), ALLOCATABLE :: work_d(:,:)
+     REAL(DP), ALLOCATABLE :: work_d(:,:)
 #if defined(__CUDA)
      attributes(DEVICE) :: work_d
 #endif
      !
      ALLOCATE( work_d( nx, nx ) )
      !
-     work_d = ZERO
+     work_d = 0.0d0
      !
      ALLOCATE( vtmp( nx, nx ) )
      !

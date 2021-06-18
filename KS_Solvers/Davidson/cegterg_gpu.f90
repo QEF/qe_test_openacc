@@ -740,7 +740,7 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   USE mp,               ONLY : mp_bcast, mp_root_sum, mp_sum, mp_barrier, &
                                mp_size, mp_type_free, mp_allgather
   USE device_fbuff_m,   ONLY : buffer => dev_buf
-  USE device_memcpy_m,  ONLY : dev_memcpy, dev_memset, dev_memcpy
+  USE device_memcpy_m,  ONLY : dev_memcpy, dev_memset
   !
   IMPLICIT NONE
   !
@@ -783,7 +783,6 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
   ! ... LOCAL variables
   !
-  COMPLEX(DP), ALLOCATABLE :: evc(:,:)
   REAL(DP), ALLOCATABLE :: e(:)
   
   INTEGER, PARAMETER :: maxter = 20
@@ -805,7 +804,6 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
     ! S matrix on the reduced basis
     ! eigenvectors of the Hamiltonian
     ! eigenvalues of the reduced hamiltonian
-  COMPLEX(DP), ALLOCATABLE :: psi(:,:), hpsi(:,:), spsi(:,:)
   COMPLEX(DP), POINTER :: psi_d(:,:), hpsi_d(:,:), spsi_d(:,:)
 #if defined(__CUDA)
   attributes(DEVICE) ::  psi_d, hpsi_d, spsi_d
@@ -832,7 +830,6 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   INTEGER :: np_ortho(2), ortho_parent_comm
   LOGICAL :: do_distr_diag_inside_bgrp
   !
-  REAL(DP), EXTERNAL :: ddot
   REAL(DP), EXTERNAL :: KSddot
   !
   EXTERNAL  h_psi_gpu, s_psi_gpu, g_psi_gpu
@@ -872,27 +869,10 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   ! compute the number of chuncks
   numblock  = (npw+blocksize-1)/blocksize
 
-  ALLOCATE(  evc( npwx*npol, nvec ), STAT=ierr )
-  IF( ierr /= 0 ) &
-     CALL errore( ' pcegterg ',' cannot allocate evc (host) ', ABS(ierr) )
   !
   ALLOCATE(  e( nvec ), STAT=ierr )
   IF( ierr /= 0 ) &
      CALL errore( ' pcegterg ',' cannot allocate e (host) ', ABS(ierr) )
-  !
-  ALLOCATE(  psi( npwx*npol, nvecx ), STAT=ierr )
-  IF( ierr /= 0 ) &
-     CALL errore( ' pcegterg ',' cannot allocate psi ', ABS(ierr) )
-  !
-  ALLOCATE( hpsi( npwx*npol, nvecx ), STAT=ierr )
-  IF( ierr /= 0 ) &
-     CALL errore( ' pcegterg ',' cannot allocate hpsi ', ABS(ierr) )
-  !
-  IF ( uspp ) THEN
-     ALLOCATE( spsi( npwx*npol, nvecx ), STAT=ierr )
-     IF( ierr /= 0 ) &
-        CALL errore( ' pcegterg ',' cannot allocate spsi ', ABS(ierr) )
-  END IF
   !
   ! ... Initialize the matrix descriptor
   !
@@ -963,14 +943,11 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   nbase  = nvec
   conv   = .FALSE.
   !
-  IF ( uspp ) spsi = ZERO
-  !
-  hpsi = ZERO
   CALL buffer%lock_buffer(psi_d, (/npwx*npol, nvecx/), ierr)
   CALL buffer%lock_buffer(hpsi_d, (/npwx*npol, nvecx/), ierr)
   CALL buffer%lock_buffer(spsi_d, (/npwx*npol, nvecx/), ierr)
   CALL buffer%lock_buffer(ew_d, nvecx, ierr)
-  
+
   CALL dev_memcpy(psi_d, evc_d, (/1, npwx*npol /), 1 , (/ 1, nvec /) )
   !
   ! ... hpsi contains h times the basis vectors
@@ -1272,18 +1249,12 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   DEALLOCATE( notcnv_ip )
   DEALLOCATE( conv )
   DEALLOCATE( ew )
-  DEALLOCATE( evc )
   DEALLOCATE( e )
   
   CALL buffer%release_buffer(psi_d, ierr)
   CALL buffer%release_buffer(hpsi_d, ierr)
   CALL buffer%release_buffer(spsi_d, ierr)
   CALL buffer%release_buffer(ew_d, ierr)
-  !
-  IF ( uspp ) DEALLOCATE( spsi )
-  !
-  DEALLOCATE( hpsi )
-  DEALLOCATE( psi )  
   !
   CALL stop_clock( 'cegterg' )
   !
@@ -1366,89 +1337,6 @@ CONTAINS
   END SUBROUTINE reorder_v
   !
   !
-  SUBROUTINE hpsi_dot_v()
-     !
-     INTEGER :: ipc, ipr
-     INTEGER :: nr, ir, ic, notcl, root, np, ipol, ib
-     COMPLEX(DP), ALLOCATABLE :: vtmp( :, : )
-     COMPLEX(DP), ALLOCATABLE :: ptmp( :, : )
-     COMPLEX(DP) :: beta
-
-     ALLOCATE( vtmp( nx, nx ) )
-     ALLOCATE( ptmp( npwx*npol, nx ) )
-
-     DO ipc = 1, idesc(LAX_DESC_NPC)
-        !
-        IF( notcnv_ip( ipc ) > 0 ) THEN
-
-           notcl = notcnv_ip( ipc )
-           ic    = ic_notcnv( ipc )
-
-           beta = ZERO
-
-           DO ipr = 1, idesc(LAX_DESC_NPR)
-              !
-              nr = nrc_ip( ipr )
-              ir = irc_ip( ipr )
-              !
-              root = rank_ip( ipr, ipc )
-
-              IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
-                 vtmp(:,1:notcl) = vl(:,1:notcl)
-              END IF
-
-              CALL mp_bcast( vtmp(:,1:notcl), root, ortho_parent_comm )
-              !
-              IF ( uspp ) THEN
-                 !
-                 CALL ZGEMM( 'N', 'N', kdim, notcl, nr, ONE, &
-                    spsi(1, ir), kdmx, vtmp, nx, beta, psi(1,nb1+ic-1), kdmx )
-                 !
-              ELSE
-                 !
-                 CALL ZGEMM( 'N', 'N', kdim, notcl, nr, ONE, &
-                    psi(1, ir), kdmx, vtmp, nx, beta, psi(1,nb1+ic-1), kdmx )
-                 !
-              END IF
-              !
-              CALL ZGEMM( 'N', 'N', kdim, notcl, nr, ONE, &
-                      hpsi(1, ir), kdmx, vtmp, nx, beta, ptmp, kdmx )
-
-              beta = ONE
-
-           END DO
-
-           !$omp parallel do collapse(3)
-           DO np = 1, notcl
-              DO ipol = 1, npol
-                 DO ib = 1, numblock
-                    !
-                    psi( (ib-1)*blocksize+(ipol-1)*npwx+1: &
-                         MIN(npw, ib*blocksize)+(ipol-1)*npwx,nbase+np+ic-1) = &
-                    ptmp((ib-1)*blocksize+(ipol-1)*npwx+1: &
-                         MIN(npw, ib*blocksize)+(ipol-1)*npwx,np) - &
-                    ew(nbase+np+ic-1) * psi((ib-1)*blocksize+(ipol-1)*npwx+1:&
-                       MIN(npw, ib*blocksize)+(ipol-1)*npwx,nbase+np+ic-1)
-                    !
-                 END DO
-              END DO
-           END DO
-           !$omp end parallel do
-           !
-           ! clean up garbage if there is any
-           IF (npw < npwx) psi(npw+1:npwx,nbase+ic:nbase+notcl+ic-1) = ZERO
-           IF (npol == 2)  psi(npwx+npw+1:2*npwx,nbase+ic:nbase+notcl+ic-1) = ZERO
-           !
-        END IF
-        !
-     END DO
-
-     DEALLOCATE( vtmp )
-     DEALLOCATE( ptmp )
-
-     RETURN
-  END SUBROUTINE hpsi_dot_v
-  !
   SUBROUTINE hpsi_dot_v_gpu()
      !
 #if defined(__CUDA)
@@ -1458,7 +1346,6 @@ CONTAINS
      INTEGER :: ipc, ipr
      INTEGER :: nr, ir, ic, notcl, root, np, ipol, ib
      COMPLEX(DP), ALLOCATABLE :: vtmp( :, : )
-     COMPLEX(DP), ALLOCATABLE :: ptmp( :, : )
      COMPLEX(DP) :: beta
      !
      COMPLEX(DP), ALLOCATABLE :: vtmp_d(:,:), ptmp_d(:,:)
@@ -1472,7 +1359,6 @@ CONTAINS
      ptmp_d = ZERO
 
      ALLOCATE( vtmp( nx, nx ) )
-     ALLOCATE( ptmp( npwx*npol, nx ) )
 
      DO ipc = 1, idesc(LAX_DESC_NPC)
         !
@@ -1536,7 +1422,6 @@ CONTAINS
      END DO
 
      DEALLOCATE( vtmp )
-     DEALLOCATE( ptmp )
 
      DEALLOCATE( vtmp_d )
      DEALLOCATE( ptmp_d )
@@ -1544,63 +1429,6 @@ CONTAINS
      RETURN
   END SUBROUTINE hpsi_dot_v_gpu
   !
-  !
-  SUBROUTINE refresh_evc( )
-     !
-     INTEGER :: ipc, ipr
-     INTEGER :: nr, nc, ir, ic, root
-     COMPLEX(DP), ALLOCATABLE :: vtmp( :, : )
-     COMPLEX(DP) :: beta
-
-     ALLOCATE( vtmp( nx, nx ) )
-     !
-     DO ipc = 1, idesc(LAX_DESC_NPC)
-        !
-        nc = nrc_ip( ipc )
-        ic = irc_ip( ipc )
-        !
-        IF( ic <= nvec ) THEN
-           !
-           nc = min( nc, nvec - ic + 1 )
-           !
-           beta = ZERO
-
-           DO ipr = 1, idesc(LAX_DESC_NPR)
-              !
-              nr = nrc_ip( ipr )
-              ir = irc_ip( ipr )
-              !
-              root = rank_ip( ipr, ipc )
-
-              IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
-                 !
-                 !  this proc sends his block
-                 !
-                 CALL mp_bcast( vl(:,1:nc), root, ortho_parent_comm )
-                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ONE, &
-                          psi(1,ir), kdmx, vl, nx, beta, evc(1,ic), kdmx )
-              ELSE
-                 !
-                 !  all other procs receive
-                 !
-                 CALL mp_bcast( vtmp(:,1:nc), root, ortho_parent_comm )
-                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ONE, &
-                          psi(1,ir), kdmx, vtmp, nx, beta, evc(1,ic), kdmx )
-              END IF
-              !
-
-              beta = ONE
-
-           END DO
-           !
-        END IF
-        !
-     END DO
-     !
-     DEALLOCATE( vtmp )
-
-     RETURN
-  END SUBROUTINE refresh_evc
   !
   SUBROUTINE refresh_evc_gpu( )
      !
@@ -1680,64 +1508,6 @@ CONTAINS
      RETURN
   END SUBROUTINE refresh_evc_gpu
   !
-  !
-  SUBROUTINE refresh_spsi( )
-     !
-     INTEGER :: ipc, ipr
-     INTEGER :: nr, nc, ir, ic, root
-     COMPLEX(DP), ALLOCATABLE :: vtmp( :, : )
-     COMPLEX(DP) :: beta
-
-     ALLOCATE( vtmp( nx, nx ) )
-     !
-     DO ipc = 1, idesc(LAX_DESC_NPC)
-        !
-        nc = nrc_ip( ipc )
-        ic = irc_ip( ipc )
-        !
-        IF( ic <= nvec ) THEN
-           !
-           nc = min( nc, nvec - ic + 1 )
-           !
-           beta = ZERO
-           !
-           DO ipr = 1, idesc(LAX_DESC_NPR)
-              !
-              nr = nrc_ip( ipr )
-              ir = irc_ip( ipr )
-              !
-              root = rank_ip( ipr, ipc )
-
-              IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
-                 !
-                 !  this proc sends his block
-                 !
-                 CALL mp_bcast( vl(:,1:nc), root, ortho_parent_comm )
-                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ONE, &
-                          spsi(1,ir), kdmx, vl, nx, beta, psi(1,nvec+ic), kdmx )
-              ELSE
-                 !
-                 !  all other procs receive
-                 !
-                 CALL mp_bcast( vtmp(:,1:nc), root, ortho_parent_comm )
-                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ONE, &
-                          spsi(1,ir), kdmx, vtmp, nx, beta, psi(1,nvec+ic), kdmx )
-              END IF
-              !
-              beta = ONE
-
-           END DO
-           !
-        END IF
-        !
-     END DO
-     !
-     CALL threaded_memcpy(spsi, psi(1,nvec+1), nvec*npol*npwx*2)
-     !
-     DEALLOCATE( vtmp )
-
-     RETURN
-  END SUBROUTINE refresh_spsi
   !
   SUBROUTINE refresh_spsi_gpu( )
      !
@@ -1824,64 +1594,6 @@ CONTAINS
      RETURN
   END SUBROUTINE refresh_spsi_gpu
   !
-  !
-  SUBROUTINE refresh_hpsi( )
-     !
-     INTEGER :: ipc, ipr
-     INTEGER :: nr, nc, ir, ic, root
-     COMPLEX(DP), ALLOCATABLE :: vtmp( :, : )
-     COMPLEX(DP) :: beta
-
-     ALLOCATE( vtmp( nx, nx ) )
-     !
-     DO ipc = 1, idesc(LAX_DESC_NPC)
-        !
-        nc = nrc_ip( ipc )
-        ic = irc_ip( ipc )
-        !
-        IF( ic <= nvec ) THEN
-           !
-           nc = min( nc, nvec - ic + 1 )
-           !
-           beta = ZERO
-           !
-           DO ipr = 1, idesc(LAX_DESC_NPR)
-              !
-              nr = nrc_ip( ipr )
-              ir = irc_ip( ipr )
-              !
-              root = rank_ip( ipr, ipc )
-
-              IF( ipr-1 == idesc(LAX_DESC_MYR) .AND. ipc-1 == idesc(LAX_DESC_MYC) .AND. la_proc ) THEN
-                 !
-                 !  this proc sends his block
-                 !
-                 CALL mp_bcast( vl(:,1:nc), root, ortho_parent_comm )
-                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ONE, &
-                          hpsi(1,ir), kdmx, vl, nx, beta, psi(1,nvec+ic), kdmx )
-              ELSE
-                 !
-                 !  all other procs receive
-                 !
-                 CALL mp_bcast( vtmp(:,1:nc), root, ortho_parent_comm )
-                 CALL ZGEMM( 'N', 'N', kdim, nc, nr, ONE, &
-                          hpsi(1,ir), kdmx, vtmp, nx, beta, psi(1,nvec+ic), kdmx )
-              END IF
-              !
-              beta = ONE
-
-           END DO
-           !
-        END IF
-        !
-     END DO
-     !
-     DEALLOCATE( vtmp )
-     !
-     CALL threaded_memcpy(hpsi, psi(1,nvec+1), nvec*npol*npwx*2)
-     !
-     RETURN
-  END SUBROUTINE refresh_hpsi
   !
   SUBROUTINE refresh_hpsi_gpu( )
      !
@@ -1971,60 +1683,6 @@ INTEGER :: i, j
   END SUBROUTINE refresh_hpsi_gpu
   !
   !
-  SUBROUTINE compute_distmat( dm, v, w )
-     !
-     !  This subroutine compute <vi|wj> and store the
-     !  result in distributed matrix dm
-     !
-     INTEGER :: ipc, ipr
-     INTEGER :: nr, nc, ir, ic, root
-     COMPLEX(DP), INTENT(OUT) :: dm( :, : )
-     COMPLEX(DP) :: v(:,:), w(:,:)
-     COMPLEX(DP), ALLOCATABLE :: work( :, : )
-     !
-     ALLOCATE( work( nx, nx ) )
-     !
-     work = ZERO
-     !
-     !  Only upper triangle is computed, then the matrix is hermitianized
-     !
-     DO ipc = 1, idesc(LAX_DESC_NPC) !  loop on column procs
-        !
-        nc = nrc_ip( ipc )
-        ic = irc_ip( ipc )
-        !
-        DO ipr = 1, ipc ! idesc(LAX_DESC_NPR) ! ipc ! use symmetry for the loop on row procs
-           !
-           nr = nrc_ip( ipr )
-           ir = irc_ip( ipr )
-           !
-           !  rank of the processor for which this block (ipr,ipc) is destinated
-           !
-           root = rank_ip( ipr, ipc )
-
-           ! use blas subs. on the matrix block
-
-           CALL ZGEMM( 'C', 'N', nr, nc, kdim, ONE , &
-                       v(1,ir), kdmx, w(1,ic), kdmx, ZERO, work, nx )
-
-           ! accumulate result on dm of root proc.
-
-           CALL mp_root_sum( work, dm, root, ortho_parent_comm )
-
-        END DO
-        !
-     END DO
-     if (ortho_parent_comm.ne.intra_bgrp_comm .and. nbgrp > 1) dm = dm/nbgrp
-     !
-     !  The matrix is hermitianized using upper triangle
-     !
-     CALL laxlib_zsqmher( nbase, dm, nx, idesc )
-     !
-     DEALLOCATE( work )
-     !
-     RETURN
-  END SUBROUTINE compute_distmat
-  !
   SUBROUTINE compute_distmat_gpu( dm, v, w )
      !
      !  This subroutine compute <vi|wj> and store the
@@ -2097,67 +1755,6 @@ INTEGER :: i, j
   END SUBROUTINE compute_distmat_gpu
   !
   !
-  SUBROUTINE update_distmat( dm, v, w )
-     !
-     INTEGER :: ipc, ipr
-     INTEGER :: nr, nc, ir, ic, root, icc, ii
-     COMPLEX(DP) :: dm( :, : )
-     COMPLEX(DP) :: v(:,:), w(:,:)
-     COMPLEX(DP), ALLOCATABLE :: vtmp( :, : )
-
-     ALLOCATE( vtmp( nx, nx ) )
-     !
-     vtmp = ZERO
-     !
-     DO ipc = 1, idesc(LAX_DESC_NPC)
-        !
-        nc = nrc_ip( ipc )
-        ic = irc_ip( ipc )
-        !
-        IF( ic+nc-1 >= nb1 ) THEN
-           !
-           nc = MIN( nc, ic+nc-1 - nb1 + 1 )
-           IF( ic >= nb1 ) THEN
-              ii = ic
-              icc = 1
-           ELSE
-              ii = nb1
-              icc = nb1-ic+1
-           END IF
-           !
-           ! icc to nc is the local index of the unconverged bands
-           ! ii is the global index of the first unconverged bands
-           !
-           DO ipr = 1, ipc ! idesc(LAX_DESC_NPR) use symmetry
-              !
-              nr = nrc_ip( ipr )
-              ir = irc_ip( ipr )
-              !
-              root = rank_ip( ipr, ipc )
-
-              CALL ZGEMM( 'C', 'N', nr, nc, kdim, ONE, v(1, ir), &
-                          kdmx, w(1,ii), kdmx, ZERO, vtmp, nx )
-              IF (ortho_parent_comm.ne.intra_bgrp_comm .and. nbgrp > 1) vtmp = vtmp/nbgrp
-              !
-              IF(  (idesc(LAX_DESC_ACTIVE_NODE) > 0) .AND. &
-                   (ipr-1 == idesc(LAX_DESC_MYR)) .AND. (ipc-1 == idesc(LAX_DESC_MYC)) ) THEN
-                 CALL mp_root_sum( vtmp(:,1:nc), dm(:,icc:icc+nc-1), root, ortho_parent_comm )
-              ELSE
-                 CALL mp_root_sum( vtmp(:,1:nc), dm, root, ortho_parent_comm )
-              END IF
-
-           END DO
-           !
-        END IF
-        !
-     END DO
-     !
-     CALL laxlib_zsqmher( nbase+notcnv, dm, nx, idesc )
-     !
-     DEALLOCATE( vtmp )
-     RETURN
-  END SUBROUTINE update_distmat
-  !
   SUBROUTINE update_distmat_gpu( dm, v, w )
      !
 #if defined(__CUDA)
@@ -2181,7 +1778,6 @@ INTEGER :: i, j
      ALLOCATE( vtmp( nx, nx ) )
      !
      vtmp = ZERO
-
      !
      DO ipc = 1, idesc(LAX_DESC_NPC)
         !

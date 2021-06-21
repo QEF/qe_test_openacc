@@ -1269,19 +1269,6 @@ SUBROUTINE pcegterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
   !
 CONTAINS
   !
-  SUBROUTINE set_to_identity( distmat, idesc )
-     INTEGER, INTENT(IN)  :: idesc(LAX_DESC_SIZE)
-     COMPLEX(DP), INTENT(OUT) :: distmat(:,:)
-     INTEGER :: i
-     distmat = ( 0_DP , 0_DP )
-     IF( idesc(LAX_DESC_MYC) == idesc(LAX_DESC_MYR) .AND. idesc(LAX_DESC_ACTIVE_NODE) > 0 ) THEN
-        DO i = 1, idesc(LAX_DESC_NC)
-           distmat( i, i ) = ( 1_DP , 0_DP )
-        END DO
-     END IF 
-     RETURN
-  END SUBROUTINE set_to_identity
-  !
   SUBROUTINE set_to_identity_gpu( distmat, idesc )
      INTEGER, INTENT(IN)  :: idesc(LAX_DESC_SIZE)
      COMPLEX(DP), INTENT(OUT) :: distmat(:,:)

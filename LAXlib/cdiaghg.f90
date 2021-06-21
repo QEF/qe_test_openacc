@@ -731,7 +731,7 @@ CONTAINS
   !
 END SUBROUTINE laxlib_pcdiaghg
 !
-#define __ELPAGPU !TOREMOVE!TOFIX
+!#define __ELPAGPU !TOREMOVE!TOFIX
 !----------------------------------------------------------------------------
 SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
   !----------------------------------------------------------------------------
@@ -746,8 +746,8 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
   USE laxlib_descriptor,      ONLY : la_descriptor, laxlib_intarray_to_desc
   USE laxlib_processors_grid, ONLY : ortho_parent_comm
   USE laxlib_processors_grid, ONLY : ortho_cntx, me_blacs, np_ortho, me_ortho, ortho_comm
-  USE zhpev_module,           ONLY : pzheevd_drv
 #if defined __ELPAGPU
+  USE zhpev_module,           ONLY : pzheevd_drv
   use elpa
 #endif
   !
@@ -787,10 +787,14 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
 #endif
   ! local block size
   COMPLEX(DP), ALLOCATABLE :: ss(:,:), hh(:,:), tt(:,:)
+  COMPLEX(DP), ALLOCATABLE :: ss_h(:,:), hh_h(:,:), tt_h(:,:), v_h(:,:)
+#if defined(__CUDA)
+  attributes(device) :: h, s, v, ss, hh, tt
+#endif
 
 #if defined(__ELPAGPU)
   !
-  CALL start_clock( 'cdiaghg' )
+  CALL start_clock_gpu( 'cdiaghg' )
   !
   CALL laxlib_intarray_to_desc(desc,idesc)
   !
@@ -839,7 +843,7 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
 
      if (info .ne. ELPA_OK) CALL lax_error__( ' cdiaghg ', ' problems setting up elpa ', ABS( info ) )
 
-     call eh%set("solver", ELPA_SOLVER_2STAGE, info)
+     call eh%set("solver", ELPA_SOLVER_1STAGE, info)
 
      ! CPU
      !call eh%set("gpu", 0, info)
@@ -847,39 +851,53 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
 
      !GPU
      call eh%set("gpu", 1, info)
-     call eh%set("complex_kernel", ELPA_2STAGE_COMPLEX_GPU, info)
+     !call eh%set("complex_kernel", ELPA_2STAGE_COMPLEX_GPU, info)
 
      !call eh%generalized_eigenvectors(hh, ss, e, v, .true., info)
 
-     ! compute the Cholesky factorization of B
-     CALL pzpotrf( 'L', n, ss, 1, 1, descsca, info )
+     ! compute the Cholesky factorization of B, on the CPU
+     allocate(ss_h, source=ss)
+     !
+     CALL pzpotrf( 'L', n, ss_h, 1, 1, descsca, info )
 
      if(info /= 0) CALL lax_error__( ' cdiaghg ', ' problems computing cholesky ', info )
 
      ! set to zero the upper triangle of ss
-     CALL sqr_setmat( 'U', n, ZERO, ss, size(ss,1), idesc )
+     CALL sqr_setmat( 'U', n, ZERO, ss_h, size(ss_h,1), idesc )
 
      ! invert triangular matrix
-     CALL pztrtri( 'L', 'N', n, ss, 1, 1, descsca, info )
+     CALL pztrtri( 'L', 'N', n, ss_h, 1, 1, descsca, info )
 
      if(info /= 0) CALL lax_error__( ' cdiaghg ', ' problems inverting triangular matrix ', ABS( info ) )
-
+     ! go back to GPU
+     ss = ss_h
+     !
      CALL sqr_mm_cannon( 'N', 'N', n, ONE, ss, nx, hh, nx, ZERO, v, nx, idesc )
      CALL sqr_mm_cannon( 'N', 'C', n, ONE, v, nx, ss, nx, ZERO, hh, nx, idesc )
 
      CALL sqr_setmat( 'H', n, ZERO, hh, size(hh,1), idesc )
-
+     !
+     ! Go back to the CPU to comply with ELPA APIs
+     ss_h = ss
+     !
+     allocate(hh_h, source=hh)
+     allocate(v_h, source=v)
+     !
      ! solve standard eigenproblem
-     call eh%eigenvectors(hh, e, v, info)
-     !CALL pzheevd_drv( .true., n, desc%nrcx, hh, e, ortho_cntx, ortho_comm )
+     call eh%eigenvectors(hh_h, e, v_h, info)
 
      if(info /= 0) CALL lax_error__( ' cdiaghg ', ' problems solving standard eigenproblem ', ABS( info ) )
-
+     !
+     ! Back to GPU
+     v = v_h
+     !
      CALL sqr_mm_cannon( 'C', 'N', n, ONE, ss, nx, v, nx, ZERO, v, nx, idesc )
 
      call elpa_deallocate(eh)
 
      call elpa_uninit()
+
+     DEALLOCATE(hh_h, ss_h, v_h)
 
   ENDIF
 
@@ -894,13 +912,14 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
      DEALLOCATE( ss, hh )
   END IF
   !
-  CALL stop_clock( 'cdiaghg' )
+  CALL stop_clock_gpu( 'cdiaghg' )
   !
   RETURN
 
 #else !__ELPAGPU
   !
-  CALL laxlib_pcdiaghg( n, h, s, ldh, e, v, idesc)
+  CALL errore('lax gpu', 'not implemented',1)
+  !CALL laxlib_pcdiaghg( n, h, s, ldh, e, v, idesc)
   !
   RETURN
 #endif !__ELPAGPU

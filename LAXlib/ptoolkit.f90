@@ -1511,6 +1511,178 @@ SUBROUTINE laxlib_zsqmher_x( n, a, lda, idesc )
    RETURN
 END SUBROUTINE laxlib_zsqmher_x
 
+SUBROUTINE laxlib_zsqmher_gpu_x( n, a, lda, idesc )
+   !
+   ! double complex (Z) SQuare Matrix HERmitianize
+   !
+   USE laxlib_descriptor
+   USE laxlib_parallel_include
+   !
+   IMPLICIT NONE
+   INCLUDE 'laxlib_kinds.fh'
+   include 'laxlib_param.fh'
+   INTEGER, INTENT(IN) :: n
+   INTEGER, INTENT(IN) :: lda
+   COMPLEX(DP)         :: a(lda,lda) 
+   INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
+#if defined(__CUDA)
+   attributes(device) :: a
+#endif
+   !
+   TYPE(la_descriptor) :: desc
+#if defined __MPI
+   INTEGER :: istatus( MPI_STATUS_SIZE )
+#endif
+   INTEGER :: i, j
+   INTEGER :: comm, myid
+   INTEGER :: nr, nc, dest, sreq, ierr, sour
+   COMPLEX(DP) :: atmp
+   COMPLEX(DP), ALLOCATABLE :: tst1(:,:)
+   COMPLEX(DP), ALLOCATABLE :: tst2(:,:)
+   COMPLEX(DP), ALLOCATABLE :: a_h(:,:)
+
+#if defined __MPI
+
+   CALL laxlib_intarray_to_desc(desc,idesc)
+
+   IF( desc%active_node <= 0 ) THEN
+      RETURN
+   END IF
+
+   IF( n /= desc%n ) &
+      CALL lax_error__( " zsqmsym ", " wrong global dim n ", n )
+   IF( lda /= desc%nrcx ) &
+      CALL lax_error__( " zsqmsym ", " wrong leading dim lda ", lda )
+
+   comm = desc%comm
+
+   nr = desc%nr 
+   nc = desc%nc 
+   IF( desc%myc == desc%myr ) THEN
+      !
+      !  diagonal block, procs work locally
+      !
+      !$cuf kernel do
+      DO j = 1, nc
+         a(j,j) = CMPLX( DBLE( a(j,j) ), 0_DP, KIND=DP )
+         DO i = j + 1, nr
+            a(i,j) = CONJG( a(j,i) )
+         END DO
+      END DO
+      !
+   ELSE IF( desc%myc > desc%myr ) THEN
+      !
+      !  super diagonal block, procs send the block to sub diag.
+      !
+      CALL GRID2D_RANK( 'R', desc%npr, desc%npc, &
+                             desc%myc, desc%myr, dest )
+#if defined(__GPU_MPI)
+      CALL mpi_isend( a, lda*lda, MPI_DOUBLE_COMPLEX, dest, 1, comm, sreq, ierr )
+#else
+      allocate(a_h, source=a)
+      CALL mpi_isend( a_h, lda*lda, MPI_DOUBLE_COMPLEX, dest, 1, comm, sreq, ierr )
+      a = a_h
+      deallocate(a_h)
+#endif
+      !
+      IF( ierr /= 0 ) &
+         CALL lax_error__( " zsqmher ", " in mpi_isend ", ABS( ierr ) )
+      !
+   ELSE IF( desc%myc < desc%myr ) THEN
+      !
+      !  sub diagonal block, procs receive the block from super diag,
+      !  then transpose locally
+      !
+      CALL GRID2D_RANK( 'R', desc%npr, desc%npc, &
+                             desc%myc, desc%myr, sour )
+#if defined(__GPU_MPI)
+      CALL mpi_recv( a, lda*lda, MPI_DOUBLE_COMPLEX, sour, 1, comm, istatus, ierr )
+#else
+      allocate(a_h, source=a)
+      CALL mpi_recv( a_h, lda*lda, MPI_DOUBLE_COMPLEX, sour, 1, comm, istatus, ierr )
+      a = a_h
+      deallocate(a_h)
+#endif
+      !
+      IF( ierr /= 0 ) &
+         CALL lax_error__( " zsqmher ", " in mpi_recv ", ABS( ierr ) )
+      !
+      !$cuf kernel do
+      DO j = 1, lda
+         DO i = j + 1, lda
+            atmp   = a(i,j)
+            a(i,j) = a(j,i)
+            a(j,i) = atmp
+         END DO
+      END DO
+      !$cuf kernel do(2)
+      DO j = 1, nc
+         DO i = 1, nr
+            a(i,j)  = CONJG( a(i,j) )
+         END DO
+      END DO
+      !
+   END IF
+
+   IF( desc%myc > desc%myr ) THEN
+      !
+      CALL MPI_Wait( sreq, istatus, ierr )
+      !
+      IF( ierr /= 0 ) &
+         CALL lax_error__( " zsqmher ", " in MPI_Wait ", ABS( ierr ) )
+      !
+   END IF
+
+#if defined __PIPPO
+   CALL MPI_Comm_rank( comm, myid, ierr )
+   ALLOCATE( tst1( n, n ) )
+   ALLOCATE( tst2( n, n ) )
+   tst1 = 0.0d0
+   tst2 = 0.0d0
+   do j = 1, desc%nc
+   do i = 1, desc%nr
+      tst1( i + desc%ir - 1, j + desc%ic - 1 ) = a( i , j )
+   end do
+   end do
+   CALL MPI_REDUCE( tst1, tst2, n*n, MPI_DOUBLE_COMPLEX, MPI_SUM, 0, comm, ierr )
+   IF( myid == 0 ) THEN
+   DO j = 1, n
+      !
+      IF( tst2(j,j) /=  CMPLX( DBLE( tst2(j,j) ), 0_DP, KIND=DP ) ) &
+        WRITE( 4000, * ) j, tst2(j,j)
+      !
+      DO i = j + 1, n
+         !
+         IF( tst2(i,j) /= CONJG( tst2(j,i) ) )  WRITE( 4000, * ) i,j, tst2(i,j)
+         !
+      END DO
+      !
+   END DO
+   END IF
+   
+   DEALLOCATE( tst1 )
+   DEALLOCATE( tst2 )
+#endif
+
+#else
+!$cuf kernel do
+   DO j = 1, n
+      !
+      a(j,j) = CMPLX( DBLE( a(j,j) ), 0_DP, KIND=DP )
+      !
+      DO i = j + 1, n
+         !
+         a(i,j) = CONJG( a(j,i) )
+         !
+      END DO
+      !
+   END DO
+
+#endif
+
+   RETURN
+END SUBROUTINE laxlib_zsqmher_gpu_x
+
 
 ! ---------------------------------------------------------------------------------
 
@@ -2563,6 +2735,355 @@ CONTAINS
    END SUBROUTINE shift_exch_block
 
 END SUBROUTINE sqr_dmm_cannon_gpu_x
+SUBROUTINE sqr_zmm_cannon_gpu_x( transa, transb, n, alpha, a, lda, b, ldb, beta, c, ldc, idesc )
+   !
+   !  Parallel square matrix multiplication with Cannon's algorithm
+   !
+   USE laxlib_descriptor
+   USE laxlib_parallel_include
+   USE cudafor
+   USE cublas
+   !
+   IMPLICIT NONE
+   INCLUDE 'laxlib_kinds.fh'
+   INCLUDE 'laxlib_param.fh'
+   !
+   CHARACTER(LEN=1), INTENT(IN) :: transa, transb
+   INTEGER, INTENT(IN) :: n
+   COMPLEX(DP), INTENT(IN) :: alpha, beta
+   INTEGER, INTENT(IN) :: lda, ldb, ldc
+   COMPLEX(DP), DEVICE :: a(lda,*), b(ldb,*), c(ldc,*)
+   INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
+   !
+   TYPE(la_descriptor) :: desc
+   !
+   !  performs one of the matrix-matrix operations
+   !
+   !     C := ALPHA*OP( A )*OP( B ) + BETA*C,
+   !
+   !  where  op( x ) is one of
+   !
+   !     OP( X ) = X   OR   OP( X ) = X',
+   !
+   !  alpha and beta are scalars, and a, b and c are square matrices
+   !
+   INTEGER :: ierr
+   INTEGER :: np
+   INTEGER :: i, j, nr, nc, nb, iter, rowid, colid
+   LOGICAL :: ta, tb
+   INTEGER :: comm
+   !
+   !
+   COMPLEX(DP), DEVICE, ALLOCATABLE :: bblk(:,:), ablk(:,:)
+   !COMPLEX(DP) :: zone = ( 1.0_DP, 0.0_DP )
+   !COMPLEX(DP) :: zzero = ( 0.0_DP, 0.0_DP )
+   !
+#if defined (__MPI)
+   !
+   integer :: istatus( MPI_STATUS_SIZE )
+   !
+#endif
+   !
+   ierr = cudaDeviceSynchronize()
+   !
+   CALL laxlib_intarray_to_desc(desc,idesc)
+   !
+   IF( desc%active_node < 0 ) THEN
+      !
+      !  processors not interested in this computation return quickly
+      !
+      RETURN
+      !
+   END IF
+
+   IF( n < 1 ) THEN
+      RETURN
+   END IF
+
+   IF( desc%npr == 1 ) THEN 
+      !
+      !  quick return if only one processor is used 
+      !
+      CALL zgemm( TRANSA, TRANSB, n, n, n, alpha, a, lda, b, ldb, beta, c, ldc)
+      !
+      RETURN
+      !
+   END IF
+
+   IF( desc%npr /= desc%npc ) &
+      CALL lax_error__( ' sqr_zmm_cannon ', ' works only with square processor mesh ', 1 )
+   !
+   !  Retrieve communicator and mesh geometry
+   !
+   np    = desc%npr
+   comm  = desc%comm
+   rowid = desc%myr
+   colid = desc%myc
+   !
+   !  Retrieve the size of the local block
+   !
+   nr    = desc%nr 
+   nc    = desc%nc 
+   nb    = desc%nrcx
+   !
+#if defined (__MPI)
+   CALL MPI_BARRIER( comm, ierr )
+   IF( ierr /= 0 ) &
+      CALL lax_error__( " sqr_zmm_cannon ", " in MPI_BARRIER ", ABS( ierr ) )
+#endif
+   !
+   allocate( ablk( nb, nb ) )
+   
+!$cuf kernel do(2) <<<*,*>>>
+   DO j = 1, nc
+      DO i = 1, nr
+         ablk( i, j ) = a( i, j )
+      END DO
+   END DO
+   !
+   !  Clear memory outside the matrix block
+   !
+!$cuf kernel do(2) <<<*,*>>>
+   DO j = nc+1, nb
+      DO i = 1, nb
+         ablk( i, j ) = ( 0.0_DP, 0.0_DP )
+      END DO
+   END DO
+!$cuf kernel do(2) <<<*,*>>>
+   DO j = 1, nb
+      DO i = nr+1, nb
+         ablk( i, j ) = ( 0.0_DP, 0.0_DP )
+      END DO
+   END DO
+   !
+   !
+   allocate( bblk( nb, nb ) )
+!$cuf kernel do(2) <<<*,*>>>
+   DO j = 1, nc
+      DO i = 1, nr
+         bblk( i, j ) = b( i, j )
+      END DO
+   END DO
+   !
+   !  Clear memory outside the matrix block
+   !
+!$cuf kernel do(2) <<<*,*>>>
+   DO j = nc+1, nb
+      DO i = 1, nb
+         bblk( i, j ) = ( 0.0_DP, 0.0_DP )
+      END DO
+   END DO
+!$cuf kernel do(2) <<<*,*>>>
+   DO j = 1, nb
+      DO i = nr+1, nb
+         bblk( i, j ) = ( 0.0_DP, 0.0_DP )
+      END DO
+   END DO
+   !
+   ierr = cudaDeviceSynchronize()
+   !
+   ta = ( TRANSA == 'C' .OR. TRANSA == 'c' )
+   tb = ( TRANSB == 'C' .OR. TRANSB == 'c' )
+   !
+   !  Shift A rowid+1 places to the west
+   ! 
+   IF( ta ) THEN
+      CALL shift_exch_block( ablk, 'W', 1 )
+   ELSE
+      CALL shift_block( ablk, 'W', rowid+1, 1 )
+   END IF
+   !
+   !  Shift B colid+1 places to the north
+   ! 
+   IF( tb ) THEN
+      CALL shift_exch_block( bblk, 'N', np+1 )
+   ELSE
+      CALL shift_block( bblk, 'N', colid+1, np+1 )
+   END IF
+   !
+   !  Accumulate on C
+   !
+   CALL zgemm( TRANSA, TRANSB, nr, nc, nb, alpha, ablk, nb, bblk, nb, beta, c, ldc)
+   !
+   DO iter = 2, np
+      !
+      ierr = cudaDeviceSynchronize()
+      !
+      !  Shift A 1 places to the east
+      ! 
+      CALL shift_block( ablk, 'E', 1, iter )
+      !
+      !  Shift B 1 places to the south
+      ! 
+      CALL shift_block( bblk, 'S', 1, np+iter )
+      !
+      !  Accumulate on C
+      !
+      CALL zgemm( TRANSA, TRANSB, nr, nc, nb, alpha, ablk, nb, bblk, nb, ( 1.0_DP, 0.0_DP ), c, ldc)
+      !
+   END DO
+
+   ierr = cudaDeviceSynchronize()
+   deallocate( ablk, bblk )
+   
+   RETURN
+
+CONTAINS
+
+   SUBROUTINE shift_block( blk, dir, ln, tag )
+      !
+      !   Block shift 
+      !
+      IMPLICIT NONE
+      COMPLEX(DP), DEVICE :: blk( :, : )
+      CHARACTER(LEN=1), INTENT(IN) :: dir      ! shift direction
+      INTEGER,          INTENT(IN) :: ln       ! shift length
+      INTEGER,          INTENT(IN) :: tag      ! communication tag
+      !
+      INTEGER :: icdst, irdst, icsrc, irsrc, idest, isour
+#if ! defined(__GPU_MPI)
+      COMPLEX(DP), ALLOCATABLE :: blk_h( :, : )
+      ALLOCATE( blk_h, SOURCE =  blk )
+      ierr = cudaDeviceSynchronize()
+#endif
+      !
+      IF( dir == 'W' ) THEN
+         !
+         irdst = rowid
+         irsrc = rowid
+         icdst = MOD( colid - ln + np, np )
+         icsrc = MOD( colid + ln + np, np )
+         !
+      ELSE IF( dir == 'E' ) THEN
+         !
+         irdst = rowid
+         irsrc = rowid
+         icdst = MOD( colid + ln + np, np )
+         icsrc = MOD( colid - ln + np, np )
+         !
+      ELSE IF( dir == 'N' ) THEN
+
+         irdst = MOD( rowid - ln + np, np )
+         irsrc = MOD( rowid + ln + np, np )
+         icdst = colid
+         icsrc = colid
+
+      ELSE IF( dir == 'S' ) THEN
+
+         irdst = MOD( rowid + ln + np, np )
+         irsrc = MOD( rowid - ln + np, np )
+         icdst = colid
+         icsrc = colid
+
+      ELSE
+
+         CALL lax_error__( ' sqr_zmm_cannon ', ' unknown shift direction ', 1 )
+
+      END IF
+      !
+      CALL GRID2D_RANK( 'R', np, np, irdst, icdst, idest )
+      CALL GRID2D_RANK( 'R', np, np, irsrc, icsrc, isour )
+      !
+#if defined (__MPI)
+      !
+#if defined(__GPU_MPI)
+      ierr = cudaDeviceSynchronize()
+      CALL MPI_SENDRECV_REPLACE(blk, nb*nb, MPI_DOUBLE_COMPLEX, &
+           idest, tag, isour, tag, comm, istatus, ierr)
+      IF( ierr /= 0 ) &
+         CALL lax_error__( " sqr_zmm_cannon ", " in MPI_SENDRECV_REPLACE 1 ", ABS( ierr ) )
+#else
+      CALL MPI_SENDRECV_REPLACE(blk_h, SIZE(blk_h), MPI_DOUBLE_COMPLEX, &
+           idest, tag, isour, tag, comm, istatus, ierr)
+      IF( ierr /= 0 ) &
+         CALL lax_error__( " sqr_mm_cannon_gpu ", " in MPI_SENDRECV_REPLACE ", ABS( ierr ) )
+      blk = blk_h
+      ierr = cudaDeviceSynchronize()
+      DEALLOCATE( blk_h )
+#endif
+      !
+#endif
+      RETURN
+   END SUBROUTINE shift_block
+   !
+   SUBROUTINE shift_exch_block( blk, dir, tag )
+      !
+      !   Combined block shift and exchange
+      !   only used for the first step
+      !
+      IMPLICIT NONE
+      COMPLEX(DP), DEVICE :: blk( :, : )
+      CHARACTER(LEN=1), INTENT(IN) :: dir
+      INTEGER,          INTENT(IN) :: tag
+      !
+      INTEGER :: icdst, irdst, icsrc, irsrc, idest, isour
+      INTEGER :: icol, irow
+#if ! defined(__GPU_MPI)
+      COMPLEX(DP), ALLOCATABLE :: blk_h( :, : )
+      ALLOCATE( blk_h, SOURCE =  blk )
+      ierr = cudaDeviceSynchronize()
+#endif
+      !
+      IF( dir == 'W' ) THEN
+         !
+         icol = rowid
+         irow = colid
+         !
+         irdst = irow
+         icdst = MOD( icol - irow-1 + np, np )
+         !
+         irow = rowid
+         icol = MOD( colid + rowid+1 + np, np )
+         !
+         irsrc = icol
+         icsrc = irow
+         !
+      ELSE IF( dir == 'N' ) THEN
+         !
+         icol = rowid
+         irow = colid
+         !
+         icdst = icol
+         irdst = MOD( irow - icol-1 + np, np )
+         !
+         irow = MOD( rowid + colid+1 + np, np )
+         icol = colid
+         !
+         irsrc = icol
+         icsrc = irow
+
+      ELSE
+
+         CALL lax_error__( ' sqr_zmm_cannon ', ' unknown shift_exch direction ', 1 )
+
+      END IF
+      !
+      CALL GRID2D_RANK( 'R', np, np, irdst, icdst, idest )
+      CALL GRID2D_RANK( 'R', np, np, irsrc, icsrc, isour )
+      !
+#if defined (__MPI)
+      !
+#if defined(__GPU_MPI)
+      ierr = cudaDeviceSynchronize()
+      CALL MPI_SENDRECV_REPLACE(blk, SIZE(blk), MPI_DOUBLE_COMPLEX, &
+           idest, tag, isour, tag, comm, istatus, ierr)
+      IF( ierr /= 0 ) &
+         CALL lax_error__( " sqr_zmm_cannon_gpu ", " in MPI_SENDRECV_REPLACE 2 ", ABS( ierr ) )
+#else
+      CALL MPI_SENDRECV_REPLACE(blk_h, SIZE(blk_h), MPI_DOUBLE_COMPLEX, &
+           idest, tag, isour, tag, comm, istatus, ierr)
+      IF( ierr /= 0 ) &
+         CALL lax_error__( " sqr_zmm_cannon_gpu ", " in MPI_SENDRECV_REPLACE 2 ", ABS( ierr ) )
+      blk = blk_h
+      ierr = cudaDeviceSynchronize()
+      DEALLOCATE( blk_h )
+#endif
+      !
+#endif
+      RETURN
+   END SUBROUTINE shift_exch_block
+
+END SUBROUTINE sqr_zmm_cannon_gpu_x
 #endif
 !=----------------------------------------------------------------------------=!
 
@@ -5867,6 +6388,114 @@ SUBROUTINE sqr_zsetmat_x( what, n, alpha, a, lda, idesc )
    !
    RETURN
 END SUBROUTINE sqr_zsetmat_x
+
+SUBROUTINE sqr_zsetmat_gpu_x( what, n, alpha, a, lda, idesc )
+   !
+   !  Set the values of a square distributed matrix 
+   !
+   IMPLICIT NONE
+   !
+   INCLUDE 'laxlib_kinds.fh'
+   include 'laxlib_param.fh'
+   !
+   CHARACTER(LEN=1), INTENT(IN) :: what
+     ! what = 'A' set all the values of "a" equal to alpha
+     ! what = 'U' set the values in the upper triangle of "a" equal to alpha
+     ! what = 'L' set the values in the lower triangle of "a" equal to alpha
+     ! what = 'D' set the values in the diagonal of "a" equal to alpha
+     ! what = 'H' clear the imaginary part of the diagonal of "a" 
+   INTEGER, INTENT(IN) :: n
+     ! dimension of the matrix
+   COMPLEX(DP), INTENT(IN) :: alpha
+     ! value to be assigned to elements of "a"
+   INTEGER, INTENT(IN) :: lda
+     ! leading dimension of a
+   COMPLEX(DP) :: a(:,:)
+     ! matrix whose values have to be set
+   INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
+     ! descriptor of matrix a
+#if defined(__CUDA)
+     attributes(device) :: a
+#endif
+   INTEGER :: i, j, ni, nj
+
+   IF( idesc(LAX_DESC_ACTIVE_NODE) < 0 ) THEN
+      !
+      !  processors not interested in this computation return quickly
+      !
+      RETURN
+      !
+   END IF
+
+   SELECT CASE( what )
+     CASE( 'U', 'u' )
+        IF( idesc(LAX_DESC_MYC) > idesc(LAX_DESC_MYR) ) THEN
+           nj = idesc(LAX_DESC_NC)
+           ni = idesc(LAX_DESC_NR)
+           !$cuf kernel do(2)
+           DO j = 1, nj
+              DO i = 1, ni
+                 a( i, j ) = alpha
+              END DO
+           END DO
+        ELSE IF( idesc(LAX_DESC_MYC) == idesc(LAX_DESC_MYR) ) THEN
+           nj = idesc(LAX_DESC_NC)
+	   !$cuf kernel do
+           DO j = 1, nj
+              DO i = 1, j - 1
+                 a( i, j ) = alpha
+              END DO
+           END DO
+        END IF
+     CASE( 'L', 'l' )
+        IF( idesc(LAX_DESC_MYC) < idesc(LAX_DESC_MYR) ) THEN
+           nj = idesc(LAX_DESC_NC)
+           ni = idesc(LAX_DESC_NR)
+           !$cuf kernel do(2)
+           DO j = 1, nj
+              DO i = 1, ni
+                 a( i, j ) = alpha
+              END DO
+           END DO
+        ELSE IF( idesc(LAX_DESC_MYC) == idesc(LAX_DESC_MYR) ) THEN
+           nj = idesc(LAX_DESC_NC)
+           ni = idesc(LAX_DESC_NR)
+           !$cuf kernel do
+           DO j = 1, nj
+              DO i = j + 1, ni
+                 a( i, j ) = alpha
+              END DO
+           END DO
+        END IF
+     CASE( 'D', 'd' )
+        IF( idesc(LAX_DESC_MYC) == idesc(LAX_DESC_MYR) ) THEN
+           ni = idesc(LAX_DESC_NR)
+           !$cuf kernel do
+           DO i = 1, ni
+              a( i, i ) = alpha
+           END DO
+        END IF
+     CASE( 'H', 'h' )
+        IF( idesc(LAX_DESC_MYC) == idesc(LAX_DESC_MYR) ) THEN
+           ni = idesc(LAX_DESC_NR)
+           !$cuf kernel do
+           DO i = 1, ni
+              a( i, i ) = CMPLX( DBLE( a(i,i) ), 0_DP, KIND=DP )
+           END DO
+        END IF
+     CASE DEFAULT
+        nj = idesc(LAX_DESC_NC)
+        ni = idesc(LAX_DESC_NR)
+        !$cuf kernel do(2)
+        DO j = 1, nj
+           DO i = 1, ni
+              a( i, j ) = alpha
+           END DO
+        END DO
+   END SELECT
+   !
+   RETURN
+END SUBROUTINE sqr_zsetmat_gpu_x
 
 !------------------------------------------------------------------------
     SUBROUTINE distribute_lambda_x( lambda_repl, lambda_dist, idesc )

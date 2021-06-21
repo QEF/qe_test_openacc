@@ -67,9 +67,9 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
   include 'laxlib_param.fh'
   include 'laxlib_kinds.fh'
   INTEGER, INTENT(IN) :: n, ldh
-  COMPLEX(DP), INTENT(INOUT) :: h(ldh,ldh), s(ldh,ldh)
+  COMPLEX(DP), INTENT(INOUT), DEVICE :: h(ldh,ldh), s(ldh,ldh)
   REAL(DP), INTENT(OUT) :: e(n)
-  COMPLEX(DP), INTENT(OUT) :: v(ldh,ldh)
+  COMPLEX(DP), INTENT(OUT), DEVICE :: v(ldh,ldh)
   INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
   LOGICAL, INTENT(IN) :: dummy
 END SUBROUTINE

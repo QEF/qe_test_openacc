@@ -275,6 +275,18 @@ SUBROUTINE laxlib_zsqmher_x( n, a, lda, idesc )
    COMPLEX(DP)         :: a(lda,lda)
    INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
 END SUBROUTINE
+#if defined (__CUDA)
+SUBROUTINE laxlib_zsqmher_gpu_x( n, a, lda, idesc )
+   IMPLICIT NONE
+   include 'laxlib_kinds.fh'
+   include 'laxlib_param.fh'
+   INTEGER, INTENT(IN) :: n
+   INTEGER, INTENT(IN) :: lda
+   COMPLEX(DP)         :: a(lda,lda)
+   ATTRIBUTES(DEVICE)  :: a
+   INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
+END SUBROUTINE
+#endif
 END INTERFACE
 
 INTERFACE sqr_setmat
@@ -300,6 +312,20 @@ SUBROUTINE sqr_zsetmat_x( what, n, alpha, a, lda, idesc )
    COMPLEX(DP) :: a(lda,*)
    INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
 END SUBROUTINE
+#if defined (__CUDA)
+SUBROUTINE sqr_zsetmat_gpu_x( what, n, alpha, a, lda, idesc )
+   IMPLICIT NONE
+   include 'laxlib_param.fh'
+   include 'laxlib_kinds.fh'
+   CHARACTER(LEN=1), INTENT(IN) :: what
+   INTEGER, INTENT(IN) :: n
+   COMPLEX(DP), INTENT(IN) :: alpha
+   INTEGER, INTENT(IN) :: lda
+   COMPLEX(DP) :: a(:,:)
+   ATTRIBUTES(DEVICE)  :: a
+    INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
+END SUBROUTINE
+#endif
 END INTERFACE
 
 
@@ -325,6 +351,17 @@ SUBROUTINE sqr_dmm_cannon_gpu_x( transa, transb, n, alpha, a, lda, b, ldb, beta,
    REAL(DP), INTENT(IN) :: alpha, beta
    INTEGER, INTENT(IN) :: lda, ldb, ldc
    REAL(DP), DEVICE :: a(:,:), b(:,:), c(:,:)
+   INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
+END SUBROUTINE
+SUBROUTINE sqr_zmm_cannon_gpu_x( transa, transb, n, alpha, a, lda, b, ldb, beta, c, ldc, idesc )
+   IMPLICIT NONE
+   include 'laxlib_kinds.fh'
+   include 'laxlib_param.fh'
+   CHARACTER(LEN=1), INTENT(IN) :: transa, transb
+   INTEGER, INTENT(IN) :: n
+   COMPLEX(DP), INTENT(IN) :: alpha, beta
+   INTEGER, INTENT(IN) :: lda, ldb, ldc
+   COMPLEX(DP), DEVICE :: a(:,:), b(:,:), c(:,:)
    INTEGER, INTENT(IN) :: idesc(LAX_DESC_SIZE)
 END SUBROUTINE
 #endif

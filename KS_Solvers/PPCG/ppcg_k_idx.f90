@@ -102,7 +102,7 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
   !
   CALL start_clock( 'ppcg_k' )
 !civn 
-  write(stdout,*) 'using ppcg_k_idx'
+  write(stdout,*) 'using ppcg_k_idx2'
 !
   !
   !  ... Initialization and validation
@@ -111,7 +111,8 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
        do_distr_diag_inside_bgrp = do_distr_diag_inside_bgrp )
   !
 !civn 
-  print_info =  3 
+  !print_info = 0 ! 3
+  print_info = 3
 !
   sbsize3 = sbsize*3
   kdim  = npwx*(npol-1) + npw
@@ -162,8 +163,15 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
   !
   !    w = hpsi - spsi*G
   call start_clock('ppcg:zgemm')
-  IF ( my_bgrp_id /= root_bgrp_id ) call threaded_memset( w, 0.d0, 2*kdimx*nact )
-  w(1:kdimx, 1:nact ) = hpsi(1:kdimx, 1:nact )
+!civn 
+  !IF ( my_bgrp_id /= root_bgrp_id ) call threaded_memset( w, 0.d0, 2*kdimx*nact )
+  !w(1:kdimx, 1:nact ) = hpsi(1:kdimx, 1:nact )
+  IF ( my_bgrp_id /= root_bgrp_id ) then 
+    call threaded_memset( w, 0.d0, 2*kdimx*nact )
+  ELSE
+    w(1:kdimx, 1:nact ) = hpsi(1:kdimx, 1:nact )
+  END IF 
+!
   CALL divide(inter_bgrp_comm,nbnd,n_start,n_end); my_n = n_end - n_start + 1; !write (*,*) nbnd,n_start,n_end
   if (overlap) then
      if (n_start .le. n_end) &
@@ -183,10 +191,18 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
   call stop_clock('ppcg:lock')
   !
   ! pack the active bands to the first columns (act_idx)
-  CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1, 1) 
-  CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1, 1) 
-  CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1, 1) 
-  if(overlap) CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1, 1) 
+!civn 
+  if (my_bgrp_id == root_bgrp_id ) then
+    CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1, 1) 
+    CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1, 1) 
+    CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1, 1) 
+    if(overlap) CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1, 1) 
+  end if
+  call mp_bcast( psi,  root_bgrp_id, inter_bgrp_comm) 
+  call mp_bcast(   w,  root_bgrp_id, inter_bgrp_comm) 
+  call mp_bcast(hpsi,  root_bgrp_id, inter_bgrp_comm) 
+  if(overlap) call mp_bcast(spsi,  root_bgrp_id, inter_bgrp_comm)  
+!
   !
   ! ... Set up iteration parameters after locking
   CALL setup_param
@@ -458,12 +474,16 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
           coord_p(1 : l, 1 : l) = K(2*l+1 : 3*l, 1 : l)
           !
           call start_clock('ppcg:zgemm')
+!civn 
+          buffer1 = C_ZERO 
           CALL ZGEMM('N','N', kdim, l, l, C_ONE, p(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
           CALL ZGEMM('N','N', kdim, l, l, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
           p(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l)
           call stop_clock('ppcg:zgemm')
           !
           call start_clock('ppcg:zgemm')
+!civn 
+          buffer1 = C_ZERO 
           CALL ZGEMM('N','N', kdim, l, l, C_ONE, hp(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
           CALL ZGEMM('N','N', kdim, l, l, C_ONE, hw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
           hp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l)
@@ -471,6 +491,8 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
           !
           if (overlap) then
              call start_clock('ppcg:zgemm')
+!civn 
+             buffer1 = C_ZERO 
              CALL ZGEMM('N','N', kdim, l, l, C_ONE, sp(1,(j-1)*sbsize + 1), kdimx, coord_p, sbsize, C_ZERO, buffer1, kdimx)
              CALL ZGEMM('N','N', kdim, l, l, C_ONE, sw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ONE, buffer1, kdimx)
              sp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l)
@@ -480,17 +502,23 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
        ELSE
           !
           call start_clock('ppcg:zgemm')
+!civn 
+          buffer1 = C_ZERO 
           CALL ZGEMM('N','N', kdim, l, l, C_ONE, w(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ZERO, buffer1, kdimx)
           p(:,(j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:, 1:l)
           call stop_clock('ppcg:zgemm')
           !
           call start_clock('ppcg:zgemm')
+!civn 
+          buffer1 = C_ZERO 
           CALL ZGEMM('N','N', kdim, l, l, C_ONE, hw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, C_ZERO, buffer1, kdimx)
           hp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:, 1:l)
           call stop_clock('ppcg:zgemm')
           !
           if (overlap) then
              call start_clock('ppcg:zgemm')
+!civn 
+             buffer1 = C_ZERO 
              CALL ZGEMM('N','N', kdim, l, l, C_ONE, sw(1,(j-1)*sbsize + 1), kdimx, coord_w, sbsize, c_ZERO, buffer1, kdimx)
              sp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:, 1:l)
              call stop_clock('ppcg:zgemm')
@@ -500,23 +528,33 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
        !
        ! Update the sub-blocks of psi and hpsi (and spsi)
        call start_clock('ppcg:zgemm')
+!civn 
+       buffer1 = C_ZERO 
+       p(kdim+1:kdimx,(j-1)*sbsize + 1:(j-1)*sbsize + l) = C_ZERO 
+!
        CALL ZGEMM('N','N', kdim, l, l, C_ONE, psi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
        psi(:, (j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l) + p(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)
        call stop_clock('ppcg:zgemm')
        !
        call start_clock('ppcg:zgemm')
+!civn 
+       buffer1 = C_ZERO 
        CALL ZGEMM('N','N', kdim, l, l, C_ONE, hpsi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
        hpsi(:, (j-1)*sbsize + 1: (j-1)*sbsize + l)  = buffer1(:,1:l) + hp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)
        call stop_clock('ppcg:zgemm')
        !
        if (overlap) then
           call start_clock('ppcg:zgemm')
+!civn 
+          buffer1 = C_ZERO 
           CALL ZGEMM('N','N', kdim, l, l, C_ONE, spsi(1,(j-1)*sbsize + 1), kdimx, coord_psi, sbsize, C_ZERO, buffer1, kdimx)
           spsi(:, (j-1)*sbsize + 1: (j-1)*sbsize + l) = buffer1(:,1:l) + sp(:,(j-1)*sbsize + 1: (j-1)*sbsize + l)
           call stop_clock('ppcg:zgemm')
        end if
        !
-       idx(col_idx(1:l)) = 1 ! keep track of which columns this bgrp has acted on  
+!civn 
+       !idx(col_idx(1:l)) = 1 ! keep track of which columns this bgrp has acted on  
+!
        !
      END DO  ! end 'separate RQ minimizations'
      ! set to zero the columns not assigned to this bgrp, inactive colums are assigned to root_bgrp
@@ -548,16 +586,29 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
        !
        !
        ! unpack the active bands to the sparse order to compute eigenvalues 
-       CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-       CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-       CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-       CALL reshape_array(hw, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-       CALL reshape_array(p, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-       CALL reshape_array(hp, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+       if (my_bgrp_id == root_bgrp_id ) then 
+         CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         CALL reshape_array(hw, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         CALL reshape_array(p, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         CALL reshape_array(hp, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         if(overlap) then 
+           CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+           CALL reshape_array(sw, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+           CALL reshape_array(sp, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         end if
+       end if 
+       call mp_bcast( psi,  root_bgrp_id, inter_bgrp_comm) 
+       call mp_bcast(hpsi,  root_bgrp_id, inter_bgrp_comm) 
+       call mp_bcast(   w,  root_bgrp_id, inter_bgrp_comm) 
+       call mp_bcast(  hw,  root_bgrp_id, inter_bgrp_comm) 
+       call mp_bcast(   p,  root_bgrp_id, inter_bgrp_comm) 
+       call mp_bcast(  hp,  root_bgrp_id, inter_bgrp_comm) 
        if(overlap) then 
-         CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-         CALL reshape_array(sw, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-         CALL reshape_array(sp, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+         call mp_bcast(spsi,  root_bgrp_id, inter_bgrp_comm) 
+         call mp_bcast(  sw,  root_bgrp_id, inter_bgrp_comm) 
+         call mp_bcast(  sp,  root_bgrp_id, inter_bgrp_comm) 
        end if
        !
        call start_clock('ppcg:RR')
@@ -596,16 +647,29 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
        call stop_clock('ppcg:lock')
        !
        ! pack the active bands to the first columns (act_idx)
-       CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
-       CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
-       CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
-       CALL reshape_array(hw, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
-       CALL reshape_array(p, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
-       CALL reshape_array(hp, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+       if (my_bgrp_id == root_bgrp_id ) then  
+         CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         CALL reshape_array(hw, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         CALL reshape_array(p, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         CALL reshape_array(hp, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         if(overlap) then 
+           CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+           CALL reshape_array(sw, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+           CALL reshape_array(sp, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         end if 
+       end if 
+       call mp_bcast( psi,  root_bgrp_id, inter_bgrp_comm)  
+       call mp_bcast(hpsi,  root_bgrp_id, inter_bgrp_comm)  
+       call mp_bcast(   w,  root_bgrp_id, inter_bgrp_comm)  
+       call mp_bcast(  hw,  root_bgrp_id, inter_bgrp_comm)  
+       call mp_bcast(   p,  root_bgrp_id, inter_bgrp_comm)  
+       call mp_bcast(  hp,  root_bgrp_id, inter_bgrp_comm)   
        if(overlap) then 
-         CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
-         CALL reshape_array(sw, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
-         CALL reshape_array(sp, kdimx, nact, nbnd, act_idx, buffer1(1,1), 1) 
+         call mp_bcast(spsi,  root_bgrp_id, inter_bgrp_comm)  
+         call mp_bcast(  sw,  root_bgrp_id, inter_bgrp_comm)  
+         call mp_bcast(  sp,  root_bgrp_id, inter_bgrp_comm)  
        end if 
        !
        ! ... Set up iteration parameters after locking
@@ -643,22 +707,28 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
       ELSE
          !
          call start_clock('ppcg:cholQR')
-         if (overlap) then
-            CALL cholQR(kdim, nact, psi, spsi, kdimx, G, nbnd)
-         else
-            CALL cholQR(kdim, nact, psi, psi, kdimx, G, nbnd)
-         end if
-         call stop_clock('ppcg:cholQR')
-         !
-         call start_clock('ppcg:ZTRSM')
-         CALL ZTRSM('R', 'U', 'N', 'N', kdim, nact, C_ONE, G, nbnd, hpsi, kdimx)
-         call stop_clock('ppcg:ZTRSM')
-         !
-         if (overlap) then
-            call start_clock('ppcg:ZTRSM')
-            CALL ZTRSM('R', 'U', 'N', 'N', kdim, nact, C_ONE, G, nbnd, spsi, kdimx)
-            call stop_clock('ppcg:ZTRSM')
-         end if
+!civn 
+         if (  my_bgrp_id == root_bgrp_id ) then   
+           if (overlap) then
+              CALL cholQR(kdim, nact, psi, spsi, kdimx, G, nbnd)
+           else
+              CALL cholQR(kdim, nact, psi, psi, kdimx, G, nbnd)
+           end if
+           call stop_clock('ppcg:cholQR')
+           !
+           call start_clock('ppcg:ZTRSM')
+           CALL ZTRSM('R', 'U', 'N', 'N', kdim, nact, C_ONE, G, nbnd, hpsi, kdimx)
+           call stop_clock('ppcg:ZTRSM')
+           !
+           if (overlap) then
+              call start_clock('ppcg:ZTRSM')
+              CALL ZTRSM('R', 'U', 'N', 'N', kdim, nact, C_ONE, G, nbnd, spsi, kdimx)
+              call stop_clock('ppcg:ZTRSM')
+           end if
+         end if 
+         call mp_bcast( psi,  root_bgrp_id, inter_bgrp_comm)  
+         call mp_bcast(hpsi,  root_bgrp_id, inter_bgrp_comm)  
+         if(overlap) call mp_bcast( spsi, root_bgrp_id, inter_bgrp_comm)
          !
       END IF
 !! EV end
@@ -717,7 +787,8 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
  END DO   !---End the main loop
  !
  ! unpack the (no-more-)active bands to the sparse order to compute eigenvalues and return the output psi
- CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+ if (my_bgrp_id == root_bgrp_id ) CALL reshape_array(psi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+ call mp_bcast( psi,  root_bgrp_id, inter_bgrp_comm)       
 !
 ! IF (nact > 0) THEN
  IF ( MOD(iter-1, rr_step) /= 0 ) THEN        ! if RR has not just been performed
@@ -726,10 +797,15 @@ SUBROUTINE ppcg_k_idx( h_psi, s_psi, overlap, precondition, &
     call start_clock('ppcg:RR')
     !
     ! unpack the (no-more-)active bands to the sparse order to compute eigenvalues and return the output 
-    CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
-    CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+    if (my_bgrp_id == root_bgrp_id ) then 
+      CALL reshape_array(hpsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+      CALL reshape_array(w, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+    end if 
+    call mp_bcast(hpsi,  root_bgrp_id, inter_bgrp_comm) 
+    call mp_bcast(   w,  root_bgrp_id, inter_bgrp_comm) 
     if(overlap) then 
-      CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+      if (my_bgrp_id == root_bgrp_id ) CALL reshape_array(spsi, kdimx, nact, nbnd, act_idx, buffer1, -1) 
+      call mp_bcast(spsi,  root_bgrp_id, inter_bgrp_comm)
       CALL extract_epairs_dmat(kdim, nbnd, kdimx, e, psi, hpsi, spsi )
     else
       CALL extract_epairs_dmat(kdim, nbnd, kdimx, e, psi, hpsi )

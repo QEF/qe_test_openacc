@@ -980,36 +980,29 @@ SUBROUTINE pregterg_gpu(h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
      ! ...         ew = <psi_i|psi_i>,  i = nbase + 1, nbase + notcnv
      !
-     ! optimize for GPU ...
-     psi = psi_d ! CHANGE
      DO n = 1, notcnv
         !
-        ew(n) = 2.D0 * ddot( npw2, psi(1,nbase+n), 1, psi(1,nbase+n), 1 )
-        !ew(n) = 2.D0 * KSDdot( npw2, psi_d(1,nbase+n), 1, psi_d(1,nbase+n), 1 )
+        ew(n) = 2.D0 * KSDdot( npw2, psi_d(1,nbase+n), 1, psi_d(1,nbase+n), 1 )
         !
-        IF ( gstart == 2 ) ew(n) = ew(n) - psi(1,nbase+n) * psi(1,nbase+n)
-        !IF ( gstart == 2 ) ew(n) = ew(n) - psi_d(1,nbase+n) * psi_d(1,nbase+n)
+        IF ( gstart == 2 ) ew(n) = ew(n) - psi_d(1,nbase+n) * psi_d(1,nbase+n)
         !
      END DO
      !
      CALL mp_sum( ew( 1:notcnv ), intra_bgrp_comm )
      !
-     !ew_d(1:notcnv) = ew(1:notcnv)
+     ew_d(1:notcnv) = ew(1:notcnv)
      !
+!$cuf kernel do(1) <<<*,*>>>
      DO n = 1, notcnv
         !
-        psi(:,nbase+n) = psi(:,nbase+n) / SQRT( ew(n) )
+        psi_d(:,nbase+n) = psi_d(:,nbase+n) / SQRT( ew_d(n) )
         ! ... set Im[ psi(G=0) ] -  needed for numerical stability
-        IF ( gstart == 2 ) psi(1,nbase+n) = CMPLX( DBLE(psi(1,nbase+n)), 0.D0 ,kind=DP)
+        IF ( gstart == 2 ) psi_d(1,nbase+n) = CMPLX( DBLE(psi_d(1,nbase+n)), 0.D0 ,kind=DP)
         !
      END DO
      !
      ! ... here compute the hpsi and spsi of the new functions
      !
-     psi_d = psi ! TOCHANGE
-     ew_d = ew !TOCHANGE
-     ! ... end optimize for GPU
-
      CALL h_psi_gpu( npwx, npw, notcnv, psi_d(1,nb1), hpsi_d(1,nb1) ) ; nhpsi = nhpsi + notcnv
      !
      IF ( uspp ) CALL s_psi_gpu( npwx, npw, notcnv, psi_d(1,nb1), spsi_d(1,nb1) )

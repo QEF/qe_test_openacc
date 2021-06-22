@@ -1605,7 +1605,7 @@ CONTAINS
         end if 
       end do 
     elseif(isgn.lt.0) then 
-      do ibnd = 1, nact 
+      do ibnd = nact, 1, -1  
         if(ibnd.ne.act_idx(ibnd)) then 
           buffer(1:kdimx) = psi(1:kdimx,act_idx(ibnd)) 
           psi(1:kdimx,act_idx(ibnd)) = psi(1:kdimx,ibnd)

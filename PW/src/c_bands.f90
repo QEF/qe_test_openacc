@@ -736,56 +736,34 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
           lrot = ( iter == 1 )
           !
 !civn 
-!         IF (.not. use_gpu ) THEN
           CALL using_evc(1) ; CALL using_et(1)
           IF ( use_para_diag ) then
              IF (.not. use_gpu ) THEN
-               !
-               CALL pcegterg( h_psi, s_psi, okvan, g_psi, &
-                              npw, npwx, nbnd, nbndx, npol, evc, ethr, &
-                              et(1,ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
-               !
-             ELSE  
-               !
-               CALL using_evc_d(1) ; CALL using_et_d(1) 
-               CALL pcegterg_gpu( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
-                              npw, npwx, nbnd, nbndx, npol, evc_d, ethr, &
-                              et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
-               !
-             END IF 
-          ELSE
-             !
-                CALL cegterg_acc ( h_psi, s_psi, okvan, g_psi, &
+                !
+                CALL pcegterg( h_psi, s_psi, okvan, g_psi, &
                                npw, npwx, nbnd, nbndx, npol, evc, ethr, &
                                et(1,ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
-          END IF
-!!          ELSE
-!!civn 
-!!            CALL using_evc_d(1) ; CALL using_et_d(1) 
-!             IF ( use_para_diag ) then
-!                !
-!                CALL using_evc_d(1) ; CALL using_et_d(1) 
-!                CALL pcegterg_gpu( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
-!                               npw, npwx, nbnd, nbndx, npol, evc_d, ethr, &
-!                               et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
+                !
+             ELSE
+                !
+                CALL using_evc_d(1) ; CALL using_et_d(1) 
+                CALL pcegterg_gpu( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
+                               npw, npwx, nbnd, nbndx, npol, evc_d, ethr, &
+                               et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
+                !
+             END IF
+          ELSE
+             !
+!$acc data copy(evc(:,:), et(:,:)) 
+!$acc host_data use_device(evc, et)
+             CALL cegterg_acc ( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
+                            npw, npwx, nbnd, nbndx, npol, evc, ethr, &
+                            et(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
+!$acc end host_data
+!$acc end data
 !
-!                !
-!             ELSE
-!                !
-!!civn 
-!!                CALL cegterg_gpu ( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
-!!                               npw, npwx, nbnd, nbndx, npol, evc_d, ethr, &
-!!                               et_d(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
-!                CALL using_evc(1) ; CALL using_et(1)
-!!$acc data copy(evc(:,:), et(:,:)) 
-!!$acc host_data use_device(evc, et)
-!                CALL cegterg_acc ( h_psi_gpu, s_psi_gpu, okvan, g_psi_gpu, &
-!                               npw, npwx, nbnd, nbndx, npol, evc, ethr, &
-!                               et(1, ik), btype(1,ik), notconv, lrot, dav_iter, nhpsi )
-!!$acc end host_data
-!!$acc end data
-!             END IF
-!!          END IF
+             !
+          END IF
           !
           avg_iter = avg_iter + dav_iter
           !

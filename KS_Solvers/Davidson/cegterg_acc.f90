@@ -138,8 +138,7 @@ SUBROUTINE cegterg_acc( h_psi_gpu, s_psi_gpu, uspp, g_psi_gpu, &
      !
   END IF
 !civn 
-!$acc data copy(evc(npwx*npol,nvec), e(nvec)) 
-!!!!!$acc data deviceptr( evc(npwx*npol,nvec), e(nvec) )   
+!$acc data deviceptr( evc(npwx*npol,nvec), e(nvec) )   
 ! 
   !
   ALLOCATE(  psi( npwx*npol, nvecx ), STAT=ierr )

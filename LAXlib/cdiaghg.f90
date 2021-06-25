@@ -849,8 +849,8 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
      !call eh%set("gpu", 0, info)
      !call eh%set("complex_kernel", ELPA_2STAGE_COMPLEX_GENERIC, info)
 
-     !GPU
-     call eh%set("gpu", 1, info)
+     !GPU (Still failing!)
+     ! call eh%set("gpu", 1, info) 
      !call eh%set("complex_kernel", ELPA_2STAGE_COMPLEX_GPU, info)
 
      !call eh%generalized_eigenvectors(hh, ss, e, v, .true., info)
@@ -878,7 +878,6 @@ SUBROUTINE laxlib_pcdiaghg_gpu( n, h, s, ldh, e, v, idesc, dummy )
      CALL sqr_setmat( 'H', n, ZERO, hh, size(hh,1), idesc )
      !
      ! Go back to the CPU to comply with ELPA APIs
-     ss_h = ss
      !
      allocate(hh_h, source=hh)
      allocate(v_h, source=v)

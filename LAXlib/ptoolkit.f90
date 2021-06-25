@@ -1540,6 +1540,10 @@ SUBROUTINE laxlib_zsqmher_gpu_x( n, a, lda, idesc )
    COMPLEX(DP), ALLOCATABLE :: tst1(:,:)
    COMPLEX(DP), ALLOCATABLE :: tst2(:,:)
    COMPLEX(DP), ALLOCATABLE :: a_h(:,:)
+   COMPLEX(DP), ALLOCATABLE :: b(:,:)
+#if defined(__CUDA)
+   attributes(device) :: b
+#endif
 
 #if defined __MPI
 
@@ -1607,20 +1611,20 @@ SUBROUTINE laxlib_zsqmher_gpu_x( n, a, lda, idesc )
       IF( ierr /= 0 ) &
          CALL lax_error__( " zsqmher ", " in mpi_recv ", ABS( ierr ) )
       !
-      !$cuf kernel do
+      allocate(b(lda,lda))
+      !$cuf kernel do(2)
       DO j = 1, lda
-         DO i = j + 1, lda
-            atmp   = a(i,j)
-            a(i,j) = a(j,i)
-            a(j,i) = atmp
+         DO i = 1, lda
+            b(j,i)   = a(i,j)
          END DO
       END DO
       !$cuf kernel do(2)
       DO j = 1, nc
          DO i = 1, nr
-            a(i,j)  = CONJG( a(i,j) )
+            a(i,j)  = CONJG(b(i,j) )
          END DO
       END DO
+      deallocate(b)
       !
    END IF
 

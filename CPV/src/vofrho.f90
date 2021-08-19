@@ -205,7 +205,7 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
 !
 zpseu = 0.0_DP 
 !
-DEV_ACC  data copyin(rhog,drhog,ht,sfac,vps,gg) copyout(rhotmp,vtemp) create(drhot) 
+DEV_ACC  data copyin(rhog,drhog,ht,sfac,vps,gg) copyout(vtemp) create(drhot,rhotmp) 
 DEV_OMP  parallel default(shared), private(ig,is,ij,i,j,k)
 
  START_WSHARE 
@@ -363,28 +363,36 @@ END_WSHARE
           CALL stop_clock("force_loc") 
       END IF
 
-DEV_ACC end data
       !
       !     calculation hartree + local pseudo potential
       !
       !
+DEV_ACC kernels 
       IF (gstart == 2) vtemp(1)=(0.d0,0.d0)
+DEV_ACC end kernels 
 
+!
+DEV_ACC parallel loop 
+!
 DEV_OMP parallel default(shared), private(ig,is)
 DEV_OMP do
       DO ig=gstart,dfftp%ngm
          vtemp(ig)=rhotmp(ig)*fpi/(tpiba2*gg(ig))
       END DO
       !
-      DO is=1,nsp
+DEV_ACC parallel loop 
 DEV_OMP do
-         DO ig=1,dffts%ngm
+      DO ig=1,dffts%ngm
+DEV_ACC loop seq 
+         DO is=1,nsp
             vtemp(ig)=vtemp(ig)+sfac(ig,is)*vps(ig,is)
          END DO
       END DO
 DEV_OMP end parallel
 
+DEV_ACC end data
       DEALLOCATE (rhotmp)
+
 !
 !     vtemp = v_loc(g) + v_h(g)
 !

@@ -397,7 +397,7 @@ DEV_OMP do
       END DO 
    END DO 
 
-DEV_ACC parallel 
+DEV_ACC parallel vector_length(128) 
 DEV_ACC loop gang private(is, fx,fy,fz) 
 DEV_OMP do  
    DO ia = 1, nat

@@ -82,6 +82,9 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
       USE fft_helper_subroutines
       
       USE plugin_variables, ONLY: plugin_etot
+#if defined(__OPENACC)
+      USE cublas
+#endif  
 
       IMPLICIT NONE
 !
@@ -390,7 +393,6 @@ DEV_ACC loop seq
       END DO
 DEV_OMP end parallel
 
-DEV_ACC end data
       DEALLOCATE (rhotmp)
 
 !
@@ -492,20 +494,23 @@ DEV_ACC end data
       ELSE
          CALL rho_r2g ( dfftp, rhor, rhog )
       END IF
-       
+DEV_ACC update device (rhog) 
       IF( nspin == 1 ) THEN
-         CALL zaxpy(dfftp%ngm, (1.0d0,0.0d0) , vtemp, 1, rhog(1,1), 1)
+         CALL zaxpy(dfftp%ngm, (1.0d0,0.0d0) , vtemp, 1, rhog(:,1), 1)
       ELSE
          isup=1
          isdw=2
-         CALL zaxpy(dfftp%ngm, (1.0d0,0.0d0) , vtemp, 1, rhog(1,isup), 1)
-         CALL zaxpy(dfftp%ngm, (1.0d0,0.0d0) , vtemp, 1, rhog(1,isdw), 1)
+DEV_ACC host_data use_device(vtemp,rhog) 
+         CALL zaxpy(dfftp%ngm, (1.0d0,0.0d0) , vtemp, 1, rhog(:,isup), 1)
+         CALL zaxpy(dfftp%ngm, (1.0d0,0.0d0) , vtemp, 1, rhog(:,isdw), 1)
+DEV_ACC end host_data  
          IF( ttsic ) THEN
             rhog( 1:dfftp%ngm, isup ) = rhog( 1:dfftp%ngm, isup ) - self_vloc(1:dfftp%ngm) 
-            rhog( 1:dfftp%ngm, isdw ) = rhog( 1:dfftp%ngm, isdw ) - self_vloc(1:dfftp%ngm) 
+            rhog( 1:dfftp%ngm, isdw ) = rhog( 1:dfftp%ngm, isdw ) - self_vloc(1:dfftp%ngm)
          END IF
       END IF
-
+DEV_ACC update self(rhog) 
+DEV_ACC end data  
       DEALLOCATE (vtemp)
       IF( ttsic ) DEALLOCATE( self_vloc )
 !

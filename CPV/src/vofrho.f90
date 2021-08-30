@@ -8,7 +8,7 @@
 !
 #if defined (_OPENACC) 
  #ifndef __OPENACC 
-  # define __OPENACC 
+  #define __OPENACC 
  #endif
 #endif 
 
@@ -21,7 +21,7 @@
  #define DEV_ACC !!!
  #define DEV_OMP !$omp 
  #define START_WSHARE DEV_OMP workshare
- #define END_WSHARE   DEV_OMP workshare
+ #define END_WSHARE   DEV_OMP end workshare
 #endif 
 
 !-----------------------------------------------------------------------

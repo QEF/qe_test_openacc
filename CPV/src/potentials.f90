@@ -362,6 +362,7 @@
       COMPLEX(DP) :: cxc, rhet, rhog, vp, gxc, gyc, gzc
 #if defined (__NEW) 
       COMPLEX(DP),ALLOCATABLE :: rp(:) 
+      INTEGER                 :: ngm_ 
 #else
       COMPLEX(DP)  :: rp 
 #endif 
@@ -371,7 +372,8 @@
       ! ... Subroutine body ...
 
 #if defined (__NEW)
-      ALLOCATE (rp(dffts%ngm))
+      ngm_ = dffts%ngm
+      ALLOCATE (rp(ngm_)) 
 #else  
       ALLOCATE( ftmp( 3, SIZE( fion, 2 ) ) )
       ftmp = 0.0d0
@@ -379,7 +381,7 @@
 !
 #if defined (__NEW)
 
-DEV_ACC data present(rhoeg) copy(fion)  create(rp) copyin(rhops, sfac, screen_coul, g, gg, mill, vps, ityp,ei1, ei2, ei3)
+DEV_ACC data present(rhoeg) copy(fion)  create(rp(ngm_)) copyin(rhops, sfac, screen_coul, g, gg, mill, vps, ityp,ei1, ei2, ei3)
 !
 DEV_OMP parallel default(none) &
 DEV_OMP shared(gstart, dffts,sfac, rhops, screen_coul, rhoeg, nsp, gg, tpiba2, tpiba, mill, g, &

@@ -368,12 +368,13 @@
 #endif 
       COMPLEX(DP) :: teigr, cnvg, cvn, tx, ty, tz, fx, fy, fz
       COMPLEX(DP), ALLOCATABLE :: ftmp(:,:)
+      INTEGER :: s_ngm_ 
 
-      ! ... Subroutine body ...
+      ! ... Subroutine body ... 
 
+      s_ngm_ = dffts%ngm
 #if defined (__NEW)
-      ngm_ = dffts%ngm
-      ALLOCATE (rp(ngm_)) 
+      ALLOCATE (rp(s_ngm_)) 
 #else  
       ALLOCATE( ftmp( 3, SIZE( fion, 2 ) ) )
       ftmp = 0.0d0
@@ -381,7 +382,7 @@
 !
 #if defined (__NEW)
 
-DEV_ACC data present(rhoeg) copy(fion)  create(rp(ngm_)) copyin(rhops, sfac, screen_coul, g, gg, mill, vps, ityp,ei1, ei2, ei3)
+DEV_ACC data present(rhoeg) copy(fion)  create(rp(s_ngm_)) copyin(rhops, sfac, screen_coul, g, gg, mill, vps, ityp,ei1, ei2, ei3)
 !
 DEV_OMP parallel default(none) &
 DEV_OMP shared(gstart, dffts,sfac, rhops, screen_coul, rhoeg, nsp, gg, tpiba2, tpiba, mill, g, &
@@ -392,7 +393,7 @@ DEV_OMP          ty, tz, teigr,fx, fy, fz )
  
 DEV_ACC parallel loop       
 DEV_OMP do  
-   DO ig = gstart, dffts%ngm
+   DO ig = gstart, s_ngm_
       rp( ig) = (0.d0,0.d0) 
       DO is = 1, nsp 
          rp( ig)   = rp( ig)  + sfac(ig, is) * rhops( ig, is)
@@ -409,7 +410,7 @@ DEV_OMP do
       fz = (0.d0, 0.d0) 
 DEV_ACC loop vector private(rhet, rhog, fpibg, ig1, ig2, ig3, gxc,gyc,gzc, cnvg, cvn, &
 DEV_ACC&                             tx, ty, tz, teigr) reduction(+:fx,fy,fz)   
-      DO ig = gstart, dffts%ngm 
+      DO ig = gstart, s_ngm_ 
          rhet = rhoeg ( ig ) 
          rhog = rhet + rp ( ig)
          IF ( tscreen ) THEN 

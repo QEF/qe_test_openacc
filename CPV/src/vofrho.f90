@@ -213,7 +213,10 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
 !
 zpseu = 0.0_DP 
 !
-DEV_ACC  data copyin(rhog,drhog,ht,sfac,vps,gg) copyout(vtemp) create(drhot,rhotmp) 
+DEV_ACC  data copyin(rhog,drhog,ht,sfac,vps,gg) copyout(vtemp) 
+DEV_ACC enter data create(drhot) 
+DEV_ACC enter data create(rhotmp) 
+
 DEV_OMP  parallel default(shared), private(ig,is,ij,i,j,k)
 
  START_WSHARE 
@@ -347,6 +350,7 @@ DEV_OMP end parallel
          CALL stress_hartree(dh6, eh*omega, sfac, rhotmp, drhot, gagb, omega )
          !
          DEALLOCATE( gagb )
+         DEV_ACC exit data delete (drhot) 
          DEALLOCATE( drhot )
          !
       END IF
@@ -397,7 +401,7 @@ DEV_ACC loop seq
          END DO
       END DO
 DEV_OMP end parallel
-
+      DEV_ACC exit data delete(rhotmp) 
       DEALLOCATE (rhotmp)
 
 !

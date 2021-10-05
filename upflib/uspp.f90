@@ -5,6 +5,13 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
+
+#if defined(__CUDA)
+#define PINMEM ,PINNED 
+#else
+#define PINMEM
+#endif
+
 MODULE uspp_param
   !
   ! ... Ultrasoft and Norm-Conserving pseudopotential parameters
@@ -128,7 +135,7 @@ MODULE uspp
   INTEGER :: nkb,        &! total number of beta functions, with struct.fact.
              nkbus        ! as above, for US-PP only
   !
-  INTEGER, ALLOCATABLE ::&
+  INTEGER, ALLOCATABLE PINMEM ::&
        indv(:,:),        &! indes linking  atomic beta's to beta's in the solid
        nhtol(:,:),       &! correspondence n <-> angular momentum l
        nhtolm(:,:),      &! correspondence n <-> combined lm index for (l,m)
@@ -150,13 +157,13 @@ MODULE uspp
        okvan = .FALSE.,&  ! if .TRUE. at least one pseudo is Vanderbilt
        nlcc_any=.FALSE.   ! if .TRUE. at least one pseudo has core corrections
   !
-  COMPLEX(DP), ALLOCATABLE, TARGET :: &
+  COMPLEX(DP), ALLOCATABLE, TARGET PINMEM :: &
        vkb(:,:)                ! all beta functions in reciprocal space
   REAL(DP), ALLOCATABLE :: &
        becsum(:,:,:)           ! \sum_i f(i) <psi(i)|beta_l><beta_m|psi(i)>
   REAL(DP), ALLOCATABLE :: &
        ebecsum(:,:,:)          ! \sum_i f(i) et(i) <psi(i)|beta_l><beta_m|psi(i)>
-  REAL(DP), ALLOCATABLE :: &
+  REAL(DP), ALLOCATABLE PINMEM :: &
        dvan(:,:,:),           &! the D functions of the solid
        deeq(:,:,:,:),         &! the integral of V_eff and Q_{nm} 
        qq_nt(:,:,:),          &! the integral of q functions in the solid (ONE PER NTYP) used to be the qq array
@@ -190,9 +197,9 @@ MODULE uspp
   ! spin-orbit coupling: qq and dvan are complex, qq has additional spin index
   ! noncolinear magnetism: deeq is complex (even in absence of spin-orbit)
   !
-  REAL(DP), ALLOCATABLE :: &
+  REAL(DP), ALLOCATABLE PINMEM :: &
        beta(:,:,:)           ! beta functions for CP (without struct.factor)
-  REAL(DP), ALLOCATABLE :: &
+  REAL(DP), ALLOCATABLE PINMEM :: &
        dbeta(:,:,:,:,:)      ! derivative of beta functions w.r.t. cell for CP (without struct.factor)
   !
 CONTAINS

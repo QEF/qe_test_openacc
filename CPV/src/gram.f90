@@ -317,10 +317,9 @@ _DEV_ACC serial  present(ibgrp_g2l)
       END DO
 _DEV_ACC end serial  
 
-_DEV_ACC end data
       IF(  ibgrp_i > 0 ) THEN
-DEV_ACC parallel private(bec_tmp_inl, inl, is, ia, iv) vector_length(32) 
-DEV_ACC loop gang 
+_DEV_ACC parallel private(bec_tmp_inl, inl, is, ia, iv) vector_length(32) 
+_DEV_ACC loop gang 
          DO ia = 1, nat
             is = ityp(ia)
             DO iv=1,nh(is)
@@ -330,7 +329,7 @@ DEV_ACC loop gang
                               - g0 * DBLE(cp_bgrp(1,ibgrp_i) * CONJG(betae(1,inl)))
 #else 
                bec_tmp_inl = 0._DP
-DEV_ACC loop vector reduction(+:bec_tmp_inl)  
+_DEV_ACC loop vector reduction(+:bec_tmp_inl)  
                DO ig =1, ngw
                   bec_tmp_inl = bec_tmp_inl + DBLE(CONJG(cp_bgrp(ig,ibgrp_i))*betae(ig,inl)) 
                END DO 
@@ -340,24 +339,25 @@ DEV_ACC loop vector reduction(+:bec_tmp_inl)
                bec_tmp(inl) = bec_tmp_inl 
             END DO
          END DO
-DEV_ACC end parallel 
+_DEV_ACC end parallel 
 !!!DEV_ACC host_data use_device(bec_tmp)
-DEV_ACC update self(bec_tmp)  
+_DEV_ACC update self(bec_tmp)  
          CALL mp_sum( bec_tmp, intra_bgrp_comm )  ! parallel sum over G vectors within a band group
-DEV_ACC update device(bec_tmp) 
+_DEV_ACC update device(bec_tmp) 
 !!!DEV_ACC end host_data
-DEV_ACC kernels 
+_DEV_ACC kernels 
          bec_bgrp( : , ibgrp_i ) = bec_tmp( : )
-DEV_ACC end kernels 
+_DEV_ACC end kernels 
       ELSE
-DEV_ACC kernels 
+_DEV_ACC kernels 
          bec_tmp = 0.0d0
-DEV_ACC end kernels 
+_DEV_ACC end kernels 
       END IF
 !!!DEV_ACC host_data use_device(bec_tmp) 
-DEV_ACC update self(bec_tmp) 
+_DEV_ACC update self(bec_tmp) 
       CALL mp_sum( bec_tmp, inter_bgrp_comm )
-DEV_ACC update device(bec_tmp) 
+_DEV_ACC update device(bec_tmp) 
+_DEV_ACC end data
 !!!DEV_ACC end host_data
 !
 !     calculate csc(k)=<cp(i)|S|cp(k)>,  k<i

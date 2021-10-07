@@ -279,10 +279,10 @@ _DEV_ACC kernels present(cp_tmp)
       END IF
 _DEV_ACC end kernels 
 !!DEV_ACC host_data use_device(cp_tmp) 
-_DEV_ACC end data
-DEV_ACC update self(cp_tmp) 
+
+_DEV_ACC update self(cp_tmp) 
       CALL mp_sum( cp_tmp, inter_bgrp_comm )
-DEV_ACC update device(cp_tmp) 
+_DEV_ACC update device(cp_tmp) 
 !!DEV_ACC end host_data
       kmax_bgrp = 0
       nk = 0
@@ -296,18 +296,18 @@ DEV_ACC update device(cp_tmp)
 
       IF( kmax_bgrp > 0 .AND. ngw > 0 ) THEN
 #if defined(__OPENACC)
-_DEV_ACC data copyin(cp_bgrp, cp_tmp) copyout(csc2) 
+DEV_ACC data copyin(cp_bgrp, cp_tmp) copyout(csc2) 
 _DEV_ACC host_data use_device(cp_bgrp, cp_tmp, csc2)  
         CALL mydgemv( 'T', 2*ngw, kmax_bgrp, 1.0d0, cp_bgrp(1,iupdwn_bgrp(iss)), 2*ngwx, cp_tmp, 1, 0.0d0, csc2, 1 )
 _DEV_ACC end host_data
-_DEV_ACC end data 
+DEV_ACC end data 
 #else
         CALL dgemv( 'T', 2*ngw, kmax_bgrp, 1.0d0, cp_bgrp(1,iupdwn_bgrp(iss)), 2*ngwx, cp_tmp, 1, 0.0d0, csc2, 1 )
 #endif 
       END IF 
       nk = 0
       iupdwn_iss = iupdwn( iss) 
-DEV_ACC serial  present(ibgrp_g2l)      
+_DEV_ACC serial  present(ibgrp_g2l)      
       DO k = iupdwn_iss, kmax
          ibgrp_k = ibgrp_g2l( k )
          IF( ibgrp_k > 0 ) THEN
@@ -315,7 +315,9 @@ DEV_ACC serial  present(ibgrp_g2l)
             csc(k) = 2.0d0 * csc2(nk) - g0 * DBLE( cp_bgrp(1,ibgrp_k) * CONJG(cp_tmp(1)) )
          END IF
       END DO
-DEV_ACC end serial  
+_DEV_ACC end serial  
+
+_DEV_ACC end data
       IF(  ibgrp_i > 0 ) THEN
 DEV_ACC parallel private(bec_tmp_inl, inl, is, ia, iv) vector_length(32) 
 DEV_ACC loop gang 

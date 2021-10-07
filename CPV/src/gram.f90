@@ -266,20 +266,20 @@ _DEV_ACC end data
       !
       kmax = i - 1
       !
-DEV_ACC data copy(csc,csc2, cp_tmp, cp_bgrp, bec_tmp, bec_bgrp) copyin(ibgrp_g2l, nh, ofsbeta, qq_nt, ityp, tvanp)  
-DEV_ACC kernels present(csc)  
+_DEV_ACC data copy(csc,csc2, cp_tmp, cp_bgrp, bec_tmp, bec_bgrp) copyin(ibgrp_g2l, nh, ofsbeta, qq_nt, ityp, tvanp)  
+_DEV_ACC kernels present(csc)  
       csc    = 0.0d0
-DEV_ACC end kernels 
+_DEV_ACC end kernels 
       ibgrp_i = ibgrp_g2l( i )
-DEV_ACC kernels present(cp_tmp) 
+_DEV_ACC kernels present(cp_tmp) 
       IF( ibgrp_i > 0 ) THEN
          cp_tmp = cp_bgrp( :, ibgrp_i )
       ELSE
          cp_tmp = 0.0d0
       END IF
-DEV_ACC end kernels 
+_DEV_ACC end kernels 
 !!DEV_ACC host_data use_device(cp_tmp) 
-DEV_ACC end data
+_DEV_ACC end data
 DEV_ACC update self(cp_tmp) 
       CALL mp_sum( cp_tmp, inter_bgrp_comm )
 DEV_ACC update device(cp_tmp) 

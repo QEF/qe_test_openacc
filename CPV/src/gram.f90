@@ -341,9 +341,11 @@ _DEV_ACC loop vector reduction(+:bec_tmp_inl)
          END DO
 _DEV_ACC end parallel 
 !!!DEV_ACC host_data use_device(bec_tmp)
-_DEV_ACC update self(bec_tmp)  
+DEV_ACC update self(bec_tmp) 
+_DEV_ACC host_data use_device (bec_tmp)  
          CALL mp_sum( bec_tmp, intra_bgrp_comm )  ! parallel sum over G vectors within a band group
-_DEV_ACC update device(bec_tmp) 
+DEV_ACC update device(bec_tmp) 
+_DEV_ACC end host_data
 !!!DEV_ACC end host_data
 _DEV_ACC kernels 
          bec_bgrp( : , ibgrp_i ) = bec_tmp( : )
@@ -357,7 +359,6 @@ _DEV_ACC end kernels
 _DEV_ACC update self(bec_tmp) 
       CALL mp_sum( bec_tmp, inter_bgrp_comm )
 _DEV_ACC update device(bec_tmp) 
-_DEV_ACC end data
 !!!DEV_ACC end host_data
 !
 !     calculate csc(k)=<cp(i)|S|cp(k)>,  k<i

@@ -29,6 +29,7 @@ SUBROUTINE do_phonon(auxdyn)
   !
 
   USE disp,            ONLY : nqs
+  USE control_flags,   ONLY : use_gpu
   USE control_ph,      ONLY : epsil, trans, qplot, only_init, &
                               only_wfc, rec_code, where_rec, reduce_io
   USE el_phon,         ONLY : elph, elph_mat, elph_simple, elph_epa
@@ -51,6 +52,7 @@ SUBROUTINE do_phonon(auxdyn)
   CHARACTER (LEN=256), INTENT(IN) :: auxdyn
   INTEGER :: iq, qind
   LOGICAL :: do_band, do_iq, setup_pw
+  LOGICAL,EXTERNAL :: check_gpu_support
   !
   qind = 0
   !
@@ -69,7 +71,8 @@ SUBROUTINE do_phonon(auxdyn)
      ! should be correctly set by prepare_q: here we force it 
      ! to be .true. in order for the code to work properly in 
      ! the case SO-MAG).
-     !
+     ! 
+     use_gpu = check_gpu_support()
      setup_pw=setup_pw .OR. (noncolin .AND. domag)
      IF (setup_pw) THEN
         IF (reduce_io .AND. (qind == 1)) THEN

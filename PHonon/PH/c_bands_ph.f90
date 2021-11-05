@@ -123,7 +123,11 @@ SUBROUTINE c_bands_nscf_ph( )
      !
      ! ... diagonalization of bands for k-point ik
      !
-     call using_evc_d(0) 
+     IF ( use_gpu ) THEN
+       call using_evc_d(0) 
+     ELSE
+       call using_evc(0)
+     END IF
      call diag_bands ( 1, ik, avg_iter )
      !
      !  In the noncolinear magnetic case we have k, k+q, -k -k-q and

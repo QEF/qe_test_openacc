@@ -300,6 +300,7 @@ add_library(qe_openacc_fortran INTERFACE)
 qe_install_targets(qe_openacc_fortran)
 ###########################################################
 if(QE_ENABLE_OPENACC)
+    find_package(OpenACC REQUIRED Fortran)
     target_link_libraries(qe_openacc_fortran
         INTERFACE OpenACC::OpenACC_Fortran)
 endif(QE_ENABLE_OPENACC)

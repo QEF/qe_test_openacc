@@ -8,7 +8,7 @@ set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -Mcache_align -Mlarge_arrays")
 if(QE_ENABLE_OPENACC)
     add_library(OpenACC::OpenACC_Fortran INTERFACE IMPORTED)
     set_target_properties(OpenACC::OpenACC_Fortran PROPERTIES
-                          INTERFACE_COMPILE_OPTIONS "-acc"
+	    INTERFACE_COMPILE_OPTIONS "-acc"
                           INTERFACE_LINK_OPTIONS "-acc")
 endif()
 

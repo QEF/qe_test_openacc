@@ -22,7 +22,7 @@ SUBROUTINE c_bands_nscf_ph( )
   USE buffers,              ONLY : get_buffer, save_buffer, close_buffer, open_buffer
   USE basis,                ONLY : starting_wfc
   USE klist,                ONLY : nkstot, nks, xk, ngk, igk_k, igk_k_d
-  USE uspp,                 ONLY : vkb, nkb, vkb_d, using_vkb, using_vkb_d 
+  USE uspp,                 ONLY : vkb, nkb 
   USE gvect,                ONLY : g
   USE wvfct,                ONLY : et, nbnd, npwx, current_k
   USE control_lr,           ONLY : lgamma
@@ -93,12 +93,9 @@ SUBROUTINE c_bands_nscf_ph( )
      !
      ! ... More stuff needed by the hamiltonian: nonlocal projectors
      !
-     IF ( use_gpu ) THEN
-        IF ( nkb > 0 ) CALL using_vkb_d(2)
-        IF ( nkb > 0 ) CALL init_us_2_gpu( ngk(ik), igk_k_d(1,ik), xk(1,ik), vkb_d )
-     ELSE
-        IF ( nkb > 0 ) CALL using_vkb(2)
-        IF ( nkb > 0 ) CALL init_us_2( ngk(ik), igk_k(1,ik), xk(1,ik), vkb )
+     IF ( nkb > 0 ) THEN
+             CALL init_us_2( ngk(ik), igk_k(1,ik), xk(1,ik), vkb )
+             !$acc update device(vkb)
      END IF
      !
      ! ... Needed for LDA+U

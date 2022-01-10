@@ -376,7 +376,9 @@ SUBROUTINE elphel_refolded (npe, imode0, dvscfins)
   allocate (evq(npol*npwx,nbnd))
   ALLOCATE (elphmat ( nbnd , nbnd , 3*nat))
   CALL apply_dpot_allocate()
-
+  !
+  !$acc enter data create(dvscfins(1:dffts%nnr, 1:nspin_mag, 1:npe), dvpsi(1:npwx*npol, 1:nbnd))
+  !
 
 ! iunwfcwann=find_free_unit()
 ! CALL diropn (iunwfcwann, 'wfc', lrwfc, exst, dvscf_dir)
@@ -477,6 +479,7 @@ SUBROUTINE elphel_refolded (npe, imode0, dvscfins)
      ENDDO
   ENDDO
   
+  !$acc exit data delete(dvscfins, dvpsi)
 
 !  CLOSE( UNIT = iunwfcwann, STATUS = 'KEEP' )
   !

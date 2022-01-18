@@ -199,6 +199,9 @@ subroutine incdrhoscf (drhoscf, weight, ik, dbecsum, dpsi)
   !
   DEALLOCATE(psi)
   DEALLOCATE(dpsic)
+#if !defined(__CUDA)
+  DEALLOCATE(nl_d)
+#endif
   !
   IF ( dffts%has_task_groups ) THEN
      DEALLOCATE(tg_psi)

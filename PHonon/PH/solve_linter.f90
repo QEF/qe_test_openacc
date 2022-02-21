@@ -87,7 +87,6 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   USE response_kernels,     ONLY : sternheimer_kernel
   USE uspp_init,            ONLY : init_us_2
   USE sym_def_module,       ONLY : sym_def
-
   implicit none
 
   integer :: irr
@@ -150,6 +149,8 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   integer  :: iq_dummy
   real(DP) :: tcpu, get_clock ! timing variables
   character(len=256) :: filename
+
+  integer :: nnr
   !
   IF (rec_code_read > 20 ) RETURN
 
@@ -161,12 +162,15 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   IF (noncolin.AND.domag) nsolv=2
 
   allocate (dvscfin ( dfftp%nnr , nspin_mag , npe))
+  nnr = dfftp%nnr
   dvscfin=(0.0_DP,0.0_DP)
   if (doublegrid) then
      allocate (dvscfins (dffts%nnr , nspin_mag , npe))
+     nnr = dffts%nnr
   else
      dvscfins => dvscfin
   endif
+  !$acc enter data create(dvscfins(1:nnr, 1:nspin_mag, 1:npe))
   allocate (drhoscfh ( dfftp%nnr, nspin_mag , npe))
   allocate (dvscfout ( dfftp%nnr, nspin_mag , npe))
   allocate (dbecsum ( (nhm * (nhm + 1))/2 , nat , nspin_mag , npe))
@@ -593,6 +597,7 @@ SUBROUTINE solve_linter (irr, imode0, npe, drhoscf)
   IF (noncolin) deallocate (dbecsum_nc)
   deallocate (dvscfout)
   deallocate (drhoscfh)
+  !$acc exit data delete(dvscfins)
   if (doublegrid) deallocate (dvscfins)
   deallocate (dvscfin)
   deallocate(aux2)

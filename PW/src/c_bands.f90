@@ -222,7 +222,7 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
   USE xc_lib,               ONLY : exx_is_active
   USE gcscf_module,         ONLY : lgcscf
   USE wavefunctions_gpum,   ONLY : evc_d, using_evc, using_evc_d
-  USE wvfct_gpum,           ONLY : et_d, using_et, using_et_d, using_g2kin
+  USE wvfct_gpum,           ONLY : et_d, using_et, using_et_d
   USE becmod_subs_gpum,     ONLY : using_becp_auto
   IMPLICIT NONE
   !
@@ -357,7 +357,6 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
        !
        ! ... h_diag is the precondition matrix
        !
-       CALL using_g2kin(0)
        CALL using_h_diag(2)
        IF ( isolve == 1 .OR. isolve == 2 ) THEN
           FORALL( ig = 1 : npw )
@@ -491,7 +490,7 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
           IF (lrot .AND. .NOT. lscf ) THEN
               !!
               CALL using_h_diag(2);
-!              CALL using_h_diag(0); CALL using_g2kin(0);
+!              CALL using_h_diag(0)
               FORALL( ig = 1 : npw )
                  h_diag(ig,1) = 1.D0 + g2kin(ig) + SQRT( 1.D0 + ( g2kin(ig) - 1.D0 )**2 )
               END FORALL
@@ -532,7 +531,7 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
           !
           !
           IF (.not. use_gpu) THEN
-            CALL using_evc(1);  CALL using_et(1); CALL using_h_diag(0); CALL using_g2kin(0) !precontidtion has intent(in)
+            CALL using_evc(1);  CALL using_et(1); CALL using_h_diag(0) !precontidtion has intent(in)
             CALL rrmmdiagg( h_psi, s_psi, npwx, npw, nbnd, evc, hevc, sevc, &
                          et(1,ik), g2kin(1), btype(1,ik), ethr, rmm_ndim, &
                          okvan, lrot, exx_is_active(), notconv, rmm_iter )
@@ -601,7 +600,6 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
        IF ( .not. use_gpu ) THEN
           call using_h_diag(2); call using_s_diag(2);
           !
-          CALL using_g2kin(0)
           DO j=1, npw
              h_diag(j, 1) = g2kin(j) + v_of_0
           END DO
@@ -726,7 +724,6 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
        !
        !write (*,*) ' inside CG solver branch '
        !
-       CALL using_g2kin(0)
        CALL using_h_diag(2);
        h_diag = 1.D0
        IF ( isolve == 1 .OR. isolve == 2) THEN
@@ -856,7 +853,7 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
 !          IF ( .NOT. lrot ) THEN
           IF (lrot .AND. .NOT. lscf ) THEN
               !
-              CALL using_h_diag(2); CALL using_g2kin(0);
+              CALL using_h_diag(2)
               h_diag = 1.D0
               FORALL( ig = 1 : npwx )
                  h_diag(ig,:) = g2kin(ig) + v_of_0
@@ -968,7 +965,7 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
        !
        IF ( .not. use_gpu ) THEN
           !
-          CALL using_g2kin(0); CALL using_h_diag(2);
+          CALL using_h_diag(2);
           !
           DO ipol = 1, npol
              !

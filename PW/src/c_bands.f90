@@ -108,7 +108,7 @@ SUBROUTINE c_bands( iter )
      !
      IF ( lsda ) current_spin = isk(ik)
      !
-     CALL g2_kin_acc( ik )
+     CALL g2_kin( ik )
      !
      ! ... More stuff needed by the hamiltonian: nonlocal projectors
      !
@@ -1220,7 +1220,7 @@ SUBROUTINE c_bands_nscf( )
      !
      IF ( lsda ) current_spin = isk(ik)
      !
-     CALL g2_kin_acc( ik )
+     CALL g2_kin( ik )
      ! 
      ! ... More stuff needed by the hamiltonian: nonlocal projectors
      !

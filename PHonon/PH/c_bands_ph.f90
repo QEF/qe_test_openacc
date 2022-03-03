@@ -90,7 +90,7 @@ SUBROUTINE c_bands_nscf_ph( )
      ! ... More stuff needed by the hamiltonian: nonlocal projectors
      !
      IF ( nkb > 0 ) THEN
-             CALL init_us_2( ngk(ik), igk_k(1,ik), xk(1,ik), vkb )
+             CALL init_us_2( ngk(ik), igk_k(1,ik), xk(1,ik), vkb , .false.)
              !$acc update device(vkb)
      END IF
      !

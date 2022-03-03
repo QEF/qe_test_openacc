@@ -38,7 +38,7 @@ SUBROUTINE c_bands_nscf_ph( )
   USE io_files,             ONLY : tmp_dir, prefix
   USE uspp_init,            ONLY : init_us_2
   USE wavefunctions_gpum,   ONLY : using_evc, using_evc_d
-  USE wvfct_gpum,           ONLY : using_et, using_g2kin
+  USE wvfct_gpum,           ONLY : using_et
   !
   IMPLICIT NONE
   !
@@ -85,11 +85,7 @@ SUBROUTINE c_bands_nscf_ph( )
      current_k = ik
      IF ( lsda ) current_spin = isk(ik)
 
-     IF ( use_gpu ) THEN
-        CALL g2_kin_gpu( ik )
-     ELSE
-        CALL g2_kin( ik )
-     END IF
+     CALL g2_kin( ik )
      !
      ! ... More stuff needed by the hamiltonian: nonlocal projectors
      !

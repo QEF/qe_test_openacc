@@ -105,3 +105,25 @@ DOUBLE PRECISION FUNCTION MYDDOT(N,DX,INCX,DY,INCY)
 
 END FUNCTION MYDDOT
 
+
+function MYDDOTv2 (n, dx, incx, dy, incy)
+#if defined(__CUDA)
+USE cudafor
+USE cublas
+#endif
+implicit none
+  DOUBLE PRECISION :: MYDDOTv2
+  integer :: n, incx, incy
+  DOUBLE PRECISION, dimension(*)  :: dx, dy
+#if defined(__CUDA)
+  attributes(device) :: dx, dy
+  attributes(device) :: MYDDOTv2
+  MYDDOTv2=cublasDDOT(n, dx, incx, dy, incy)
+#else
+  MYDDOTv2=DDOT(n, dx, incx, dy, incy)
+#endif
+
+  return
+end function MYDDOTv2
+
+

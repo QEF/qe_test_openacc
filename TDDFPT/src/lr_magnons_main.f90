@@ -43,6 +43,7 @@ PROGRAM lr_magnons_main
   USE uspp,                  ONLY : okvan
   USE clib_wrappers,         ONLY : memstat
   USE klist,                 ONLY : igk_k
+  USE control_flags,         ONLY : use_gpu
   !
   IMPLICIT NONE
   !
@@ -55,6 +56,7 @@ PROGRAM lr_magnons_main
   LOGICAL             :: rflag
   INTEGER             :: kilobytes
   LOGICAL, EXTERNAL   :: test_restart
+  LOGICAL, EXTERNAL   :: check_gpu_support
   !
   pol_index = 1
   !
@@ -75,6 +77,7 @@ PROGRAM lr_magnons_main
   !
   magnons  = .TRUE.
   !
+  use_gpu = check_gpu_support()
   ! Reading input file and PWSCF xml, some initialisation
   ! Read the input variables for TDDFPT;
   ! allocate space for all quantities already computed

@@ -52,6 +52,7 @@ SUBROUTINE lr_readin
   USE constants,           ONLY : eps4, rytoev
   USE control_lr,          ONLY : lrpa, alpha_mix, ethr_nscf
   USE mp_world,            ONLY : world_comm
+  USE scf_gpum,            ONLY: vrs_d
 
   IMPLICIT NONE
   !
@@ -467,6 +468,9 @@ SUBROUTINE lr_readin
   ! vrs = vltot + v%of_r
   !
   CALL set_vrs ( vrs, vltot, v%of_r, 0, 0, dfftp%nnr, nspin, doublegrid )
+#if defined(__CUDA)  
+  vrs_d = vrs     
+#endif
   !
   DEALLOCATE( vltot )
   CALL destroy_scf_type(v)

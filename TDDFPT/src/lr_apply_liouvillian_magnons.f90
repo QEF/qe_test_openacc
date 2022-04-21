@@ -39,6 +39,7 @@ SUBROUTINE lr_apply_liouvillian_magnons( evc1, evc1_new, L_dag )
  
   USE io_global,             ONLY : stdout
   USE uspp_init,             ONLY : init_us_2
+  USE scf_gpum,              ONLY : vrs_d
 
   IMPLICIT NONE
   !
@@ -152,7 +153,8 @@ SUBROUTINE lr_apply_liouvillian_magnons( evc1, evc1_new, L_dag )
      ! The vkb's are needed for the non-local potential in h_psi,
      ! and for the ultrasoft term.
      !
-     CALL init_us_2 (npwq, igk_k(1,ikq), xk(1,ikq), vkb)
+     CALL init_us_2 (npwq, igk_k(1,ikq), xk(1,ikq), vkb, .true.)
+     !$acc update host(vkb)
      !
      ! Read unperturbed wavefuctions evc (wfct at k) 
      ! and evq (wfct at k+q)
@@ -258,7 +260,9 @@ SUBROUTINE lr_apply_liouvillian_magnons( evc1, evc1_new, L_dag )
      ! Apply the operator ( H - \epsilon S + alpha_pv P_v) to evc1
      ! where alpha_pv = 0
      !
+     !$acc data copyin(evq) copy(evc1(1:npwx*npol,1:nbnd,ik,1),sevc1_new(1:npwx*npol,1:nbnd,ik), et(:,ikk))
      CALL ch_psi_all (npwq, evc1(:,:,ik,1), sevc1_new(:,:,ik,1), et(:,ikk), ik, nbnd_occ(ikk)) 
+     !$acc end data
      !
      IF (ALLOCATED(psic_nc)) DEALLOCATE(psic_nc)
      !
@@ -400,16 +404,25 @@ SUBROUTINE lr_apply_liouvillian_magnons( evc1, evc1_new, L_dag )
      vrs(:,3) = - vrs(:,3)
      vrs(:,4) = - vrs(:,4)     
      !
+#if defined(__CUDA)
+     vrs_d = vrs
+#endif
      ! Apply the operator ( H - \epsilon S + alpha_pv P_v) to evc1
      ! where alpha_pv = 0
      !
+     !$acc data copyin(evq) copy(evc1(1:npwx*npol,1:nbnd,ik,2),sevc1_new(1:npwx*npol,1:nbnd,ik,2), et(:,imk))
      CALL ch_psi_all (npwq, evc1(:,:,ik,2), sevc1_new(:,:,ik,2), et(:,imk), ik, nbnd_occ(imk))
+     !$acc end data
      !
      ! Change the sign of b_xc back
      !
      vrs(:,2) = - vrs(:,2)
      vrs(:,3) = - vrs(:,3)
      vrs(:,4) = - vrs(:,4)
+     !
+#if defined(__CUDA)
+     vrs_d = vrs
+#endif
      !
      IF (ALLOCATED(psic_nc)) DEALLOCATE(psic_nc)
      !
